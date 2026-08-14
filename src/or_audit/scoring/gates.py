@@ -175,8 +175,10 @@ class GatePolicy(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     version: str = "1"
-    #: Confidence at or below which an observation is treated as no evidence.
-    #: Set conservatively: a low-confidence "achieved" must not clear a gate.
+    #: Confidence strictly below which an observation is treated as no
+    #: evidence. An observation exactly at the floor counts. Set
+    #: conservatively: a low-confidence "achieved" must not clear a gate, and
+    #: a low-confidence "not achieved" must not fail one.
     min_confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.6
     #: Distance at or below which an instrument is judged too close.
     proximity_alarm_mm: Annotated[float, Field(gt=0.0)] = 5.0
