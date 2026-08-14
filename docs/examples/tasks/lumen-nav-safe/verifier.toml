@@ -1,0 +1,14 @@
+# Companion to task.toml. Separated so the projection used for RL cannot be
+# mistaken for the attested vector (docs/ASSESSMENT.md §5 R3, §7).
+
+[vector]
+gates = ["wall_penetration"]
+metrics = ["raw_success", "safe_success", "diverged"]
+headline = "safe_success"
+
+[projection]
+# Optional, for PPO-style training only. Not a leaderboard number.
+id = "gated_reach_v0"
+# Zero if any hard gate failed or the episode diverged; else 1 on raw success.
+rule = "0 if (unsafe or diverged) else float(raw_success)"
+version = "0"

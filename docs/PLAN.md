@@ -4,6 +4,8 @@
 **Status:** Implementation plan (v2 — re-thesis after competitive review)
 **Scope:** Surgical / procedural / robotic medicine ONLY. Knowledge-work clinical evals (Doctronic-class) are explicitly out of scope — different product, buyer, data rights, modality, and assurance regime. Treat as a separate company decision.
 
+**Companion:** [`ASSESSMENT.md`](ASSESSMENT.md) straw-mans and steel-mans this plan against a second reading of the same kernel: Harbor / Prime Intellect-class **eval environments for technical AI in medicine**, with Lumen as the world model and AngioStress as the real-data perception bench. Kernel invariants in §7.1–7.3 and §8 are shared. The assessment does not clear Phase 0 and does not replace this document as the credentialing-mode spec.
+
 **What changed from v1:** the moat claim moved from *kinematics access* to *vendor-neutral, conflict-free assessment*. v1 named kinematics as the key differentiator; the signal is emitted and controlled by the robot vendors, and at least one vendor now ships native AI skill scoring built on it (§4). v1 also treated incumbent entry as a future risk; it is present-tense. Several external legal and technical claims that v1 asserted are demoted to owned verification items in §V.
 
 ---
@@ -59,7 +61,7 @@ v1 treated incumbent entry as a risk to monitor. It has occurred. Plan according
 
 - Not an intraoperative decision-support device. Wedge intended use is **education, credentialing, and retrospective QA** — positioned on the non-regulated side of the intended-use line, subject to counsel confirmation (§V-2).
 - Not a surgical robot. Not hardware.
-- Not a general AI-eval framework (Harbor/Braintrust class). The harness is a delivery vehicle; the product is the **corpus + labels + calibrated scorer + legal wrapper**.
+- Not a naive Harbor/Braintrust port (Docker sandbox + scalar `reward.txt`). The kernel is a delivery vehicle *for credentialing mode*; [`ASSESSMENT.md`](ASSESSMENT.md) argues the same kernel is the product if the buyers are labs and policy teams. Either way the extra constraints (vector verifier, abstention, de-id as isolation, panel oracles) stay. Do not collapse them to fit a coding-agent harness.
 - Not the knowledge-work clinical eval product. Separate.
 
 ## 6. Buyers (reordered; no segment claimed as validated pre-Phase 0)
