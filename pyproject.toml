@@ -8,6 +8,7 @@ license = { text = "UNLICENSED" }
 authors = [{ name = "SeldingerMed" }]
 dependencies = [
     "pydantic>=2.7,<3",
+    "numpy>=1.26",
 ]
 
 [project.optional-dependencies]
@@ -65,7 +66,10 @@ ignore = [
 "tests/**" = ["ANN201", "ANN001"]
 
 [tool.mypy]
-python_version = "3.11"
+# 3.12 rather than 3.11: numpy ships stubs using PEP 695 `type` statements,
+# which mypy only parses at 3.12+. Runtime support remains 3.11 and the test
+# matrix covers it; this setting affects stub parsing, not emitted code.
+python_version = "3.12"
 files = ["src", "tests"]
 strict = true
 warn_unreachable = true
