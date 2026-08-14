@@ -3,23 +3,21 @@
 Vector verifier and attestation kernel for procedural skill, safety, and
 technical-AI evaluation.
 
-> **Status: v0.1 alpha, pre-Phase-0.** This is engineering scaffolding. Two
-> product readings exist and are not the same company:
+> **Status: v0.1 alpha.** Engineering scaffolding for a Harbor analog:
+> evaluate procedural medical agents in physics and image environments, with
+> a vector verifier that cannot hide injury inside a reach metric.
 >
-> - [`docs/PLAN.md`](docs/PLAN.md) — vendor-neutral **credentialing / QA**
->   attestation about named surgeons. Phase 0 gates (demand, legal
->   holdability, annotation economics, data rights) are **not cleared**.
-> - [`docs/ASSESSMENT.md`](docs/ASSESSMENT.md) — straw-man / steel-man of this
->   repo as a **Harbor / Prime Intellect analog for technical AI in medicine**,
->   using [Lumen](https://github.com/SeldingerMed/seldinger-lumen) as the
->   world-model environment and
->   [AngioStress](https://github.com/SeldingerMed/angiostress-benchmark) as the
->   real-data perception bench. Includes a refinement plan and
->   pre-deployment test gates.
+> - **Wedge (this is the product):** [`docs/BUILD.md`](docs/BUILD.md) — task
+>   format, runner, datasets, RL projection, registry. First ship is Lumen
+>   `safe_success` evals, then AngioStress, then image-conditioned agents.
+> - **Gated mode:** [`docs/PLAN.md`](docs/PLAN.md) — named-surgeon
+>   credentialing. Phase 0 is **not** cleared and does **not** block the wedge.
+> - **Context:** [`docs/ASSESSMENT.md`](docs/ASSESSMENT.md) — straw-man /
+>   steel-man and pre-deployment test layers.
 >
 > Kernel invariants (no scalar collapse, required abstention, de-id as a gate,
-> video-first, pinned audit chain) are shared. Nothing here should be read as
-> a validated product or as legal, regulatory, or clinical advice.
+> pinned audit chain) are shared. Nothing here is a validated product or
+> legal, regulatory, or clinical advice.
 
 ## What this is
 
@@ -28,11 +26,10 @@ intended: sim, public video, de-identified clinical video), runs it through
 hard safety gates and soft skill metrics that **cannot be averaged into each
 other**, and emits a versioned, contestable artifact.
 
-One intended use is independent scoring of robotic surgical video for
-credentialing bodies (`PLAN.md` §§1, 4). Another is evaluation of *models and
-policies* in procedural environments — the Harbor-shaped product in
-`ASSESSMENT.md`. The v0.1 code is the kernel both uses. It is not yet either
-product.
+The product is the Harbor-shaped eval harness in `BUILD.md`. One later mode
+is independent scoring of robotic surgical video for credentialing bodies
+(`PLAN.md`). The v0.1 code is the kernel both use. `or-audit tasks validate`
+is the first Harbor verb that actually runs.
 
 The thesis that survives both readings is **not** "we can score robotic
 surgery" — vendors already do that — but that an independent *vector*
@@ -67,6 +64,7 @@ plan and should not be relaxed without amending it.
 
 ```
 src/or_audit/
+  eval/      Harbor-shaped tasks, datasets, trial vectors (BUILD.md P0)
   domain/    entities, closed vocabularies, invariants (no I/O)
   audit/     canonical serialization, tamper-evident append-only trail
   media/     frame access behind a FrameSource protocol
@@ -76,9 +74,10 @@ src/or_audit/
   scoring/   hard safety gates; binary proficiency and GEARS
   metrics/   ICC(2,1), Fleiss kappa, the section 13 agreement gate
   decision/  pre-registered decision rule, contestation, disclosure
-docs/PLAN.md        credentialing-mode product plan
-docs/ASSESSMENT.md  Harbor-for-medicine assessment, refinement, test gates
-docs/examples/tasks/ sketch of a Lumen task under the proposed contract
+docs/BUILD.md       Harbor-for-medicine build plan (the wedge)
+docs/PLAN.md        credentialing-mode spec (gated; does not block B)
+docs/ASSESSMENT.md  straw-man / steel-man and pre-deployment test layers
+docs/examples/      P0 fixtures: lumen-nav-safe task + lumen-nav-v0 dataset
 ```
 
 ## Development
@@ -93,6 +92,9 @@ uv run pytest              # tests
 uv run ruff check .        # lint
 uv run ruff format .       # format
 uv run mypy                # types
+
+uv run or-audit tasks validate docs/examples/tasks/lumen-nav-safe
+uv run or-audit datasets validate docs/examples/datasets/lumen-nav-v0
 ```
 
 CI runs lint, format check, mypy, and the test matrix on 3.11–3.13 with a

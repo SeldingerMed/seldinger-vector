@@ -36,3 +36,13 @@ class ScoreContractError(OrAuditError):
     Per PLAN.md section 7.1, hard safety gates never average into soft
     scores and the vector is never implicitly collapsed to a scalar.
     """
+
+
+class TaskContractError(OrAuditError):
+    """A Harbor-shaped eval task or dataset violates the BUILD.md contract.
+
+    Distinct from :class:`ScoreContractError`, which is about collapsing a
+    vector after it exists. This is about refusing to *load* a task that
+    would make that collapse the default (raw-reach headlines, human
+    determinations on a policy, attested procedural PHI, and so on).
+    """

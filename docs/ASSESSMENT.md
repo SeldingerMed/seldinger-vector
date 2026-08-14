@@ -9,7 +9,11 @@ This document exists because `PLAN.md` and the founding intent are not the same 
 - `PLAN.md` is a **credentialing / QA attestation** thesis: sell a vendor-neutral score of *named surgeons* to hospitals and robot-platform challengers, under a legal wrapper a risk officer can hold.
 - The founding intent, restated against this repo, is an **eval environment and assessment layer for technical AI in medicine** — physical AI, image-conditioned decisions, world models, robotics — the thing Harbor and Prime Intellect are for coding agents, built for procedures instead of terminals.
 
-v0.1 accidentally implemented the *hard subset* of the second product while marketing the first. That is not a failure. It is a category error that, if left uncorrected, will either kill a real eval platform by forcing it through hospital procurement, or ship a credentialing product whose Phase 0 gates (`PLAN.md` §12, §V) are still open.
+**Decision (2026-08-14): Future B is the wedge.** Build Harbor-for-medicine — niche eval / RL infrastructure for procedural medical AI and world models. Named-human credentialing (`PLAN.md`) stays a gated mode on the same rails and does not block this plan.
+
+The definitive build spec is [`BUILD.md`](BUILD.md). This file remains the straw-man / steel-man and the pre-deployment test layers.
+
+v0.1 accidentally implemented the *hard subset* of that product while marketing credentialing. That is not a failure. It is a category error this plan corrects.
 
 Nothing here clears those gates. Nothing here is clinical validation, regulatory advice, or a claim that the synthetic demo is evidence of performance.
 
@@ -430,12 +434,12 @@ The rejected column is how this becomes a meme. The keep column is why v0.1's ap
 
 ---
 
-## 8. Decision this document is asking for
+## 8. Decision
 
-Three questions, cheaper than more code:
+Future B is the wedge. See [`BUILD.md`](BUILD.md).
 
-1. **Is Future B the wedge?** If yes, this repo's next implementation work is R1–R3 (task contract, agent protocol, runner) against Lumen and AngioStress, and `PLAN.md` Phase 0's hospital-ACV gate stops being the thing that blocks a first ship. If no, stop analogizing to Harbor; execute `PLAN.md` as written and accept its kill criteria.
-2. **Is the harness the company, or is the corpus?** Lumen's answer was: open the machinery, keep patient data private. OR-Audit should give the same answer in writing (R4) before a single external user depends on it.
-3. **What is the first deployed number?** Recommendation: a Lumen `safe_success` leaderboard row produced *through* this harness, not a credentialing determination, not a CVS AUROC. That number is allowed to be small. It is not allowed to be a scalar that hides wall injury.
+1. **Wedge = eval hub**, not hospital credentialing. `PLAN.md` Phase 0 no longer blocks a first ship of Lumen/AngioStress evals.
+2. **Harness is the company; corpus stays private / procedural-public.** Same firewall as Lumen. Public tasks repo at P4, Apache-2.0.
+3. **First deployed number = Lumen `safe_success` through this harness.** Small is fine. Hiding wall injury is not.
 
-Until those are answered, further feature work on privileging reports is polishing Future C's demo. Further feature work on detectors-as-if-they-were-models is polishing the straw man. The kernel is already strict enough to be worth wrapping around environments that exist.
+P0 (task/dataset/vector types, `or-audit tasks validate`) ships in this repository. P1 (Lumen adapter, `or-audit run`) is the next PR, against a pinned Lumen commit.

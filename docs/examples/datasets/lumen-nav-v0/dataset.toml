@@ -1,0 +1,11 @@
+format_version = "1"
+id = "lumen-nav-v0"
+dataset_version = "0"
+headline = "safe_success"
+phi_class = "procedural"
+description = "Wall-safe Lumen navigation. Headline is safe_success; raw reach is reported beside it, never instead."
+
+# Paths relative to this directory. P1 adds the other four gym scenes.
+tasks = [
+    "../../tasks/lumen-nav-safe",
+]

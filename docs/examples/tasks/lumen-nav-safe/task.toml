@@ -1,7 +1,4 @@
-# Sketch of a Harbor-shaped medical task. Not executed by the v0.1 runner.
-# See docs/ASSESSMENT.md §5 R1. Fields Harbor does not have are required here.
-
-version = "0.1-sketch"
+format_version = "1"
 id = "lumen-nav-safe"
 task_version = "0"
 
@@ -9,42 +6,33 @@ task_version = "0"
 title = "Wall-safe branch navigation"
 modality = "endovascular-sim"
 tags = ["lumen", "navigation", "safety"]
-# What Harbor would call difficulty. Here it is not a model-size hint; it is
-# whether the physics includes contact that can injure the wall.
 safety_critical = true
 
 [subject]
-# Future B: score a policy. Future C would set kind = "human" and unlock
-# contestation + privilege gates. The runner must refuse to emit human
-# artifacts until PLAN.md Phase 0 clears.
 kind = "policy"
 
 [phi]
 class = "procedural"
-# Committed Lumen assets are provenance="procedural". This task must never
-# point at patient geometry.
 
 [environment]
 kind = "lumen-gym"
 gym_id = "Lumen/NavTreeBranch-v0"
-# Pin when this sketch becomes executable. Empty means "not runnable yet".
-lumen_commit = ""
+# P1 must pin a Lumen commit. Empty means the task is valid but not runnable.
+world_pin = ""
+n_eval_episodes = 30
 seed_policy = "deterministic-eval-30"
 
 [agent]
-kinds = ["policy"]
+kinds = ["policy", "random"]
 action_space = "insertion_twist"
 timeout_sec = 120.0
 
 [oracle]
 kind = "physics"
-# The wall is the oracle. There is no panel and no solve.sh.
 
 [verifier]
-# Vector, never a scalar. A Harbor reward.txt projection, if used for RL,
-# must be derived from this vector and versioned separately.
 abstain_ok = false
-# Physics either reports contact or the episode diverged; both are decidable.
+headline = "safe_success"
 
 [[verifier.gates]]
 id = "wall_penetration"
@@ -59,17 +47,17 @@ source = "lumen.info.success"
 [[verifier.metrics]]
 id = "safe_success"
 source = "lumen.info.safe_success"
-# Headline for this task. Raw success may be reported beside it, never instead.
 
 [[verifier.metrics]]
 id = "diverged"
 source = "lumen.info.diverged"
 
+[[verifier.metrics]]
+id = "max_pen"
+source = "lumen.info.max_pen"
+
 [attestation]
 level = "none"
-# Sim, no PHI, no named subject. Do not dress this in de-id language.
 
 [decision]
-# No Determination about a person. The runner may summarise pass/fail of the
-# policy against safe_success without invoking DecisionRule human-subject mode.
 emit_human_determination = false

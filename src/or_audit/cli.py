@@ -1,23 +1,11 @@
 """Command-line entry points.
 
-Three commands, each answering a question someone actually asks:
+``demo`` / ``verify-audit`` / ``describe-rule``
+    The original credentialing-mode tools. Still work; they are not the wedge.
+``tasks validate`` / ``tasks describe`` / ``datasets validate``
+    BUILD.md P0: load the Harbor-shaped eval contract without talking to Lumen.
 
-``demo``
-    Does the whole chain work? Runs synthetic data end to end and prints the
-    credentialing report and the audit summary.
-``verify-audit``
-    Is this audit log intact? Verifies a chain against an externally pinned
-    head hash, which is the only way tail truncation is detectable. Without a
-    pin it exits 3 rather than 0: a clean exit code from a check that could not
-    see truncation would be read by a script as a full pass, and the pin's
-    provenance is the entire security property. ``--allow-unpinned`` is the
-    explicit acknowledgement.
-``describe-rule``
-    What rule will be applied? Prints the decision rule for publication before
-    a pilot, as PLAN.md section 7.2 requires.
-
-Written against ``argparse`` rather than a CLI framework: three commands do not
-justify a dependency, and this file is small enough to read in one sitting.
+Written against ``argparse`` rather than a CLI framework.
 """
 
 from __future__ import annotations
@@ -32,7 +20,8 @@ from or_audit.audit.trail import AuditTrail
 from or_audit.decision.rule import DecisionRule
 from or_audit.demo import run_demo
 from or_audit.domain.enums import ThresholdOwner
-from or_audit.errors import AuditChainError
+from or_audit.errors import AuditChainError, TaskContractError
+from or_audit.eval.loader import load_dataset, load_task
 from or_audit.version import PACKAGE_VERSION
 
 _DISCLAIMER = (
@@ -124,11 +113,51 @@ def _describe_rule(args: argparse.Namespace) -> int:
     return 0
 
 
+def _tasks_validate(args: argparse.Namespace) -> int:
+    """Load a task directory and exit 0 only if the contract holds."""
+    try:
+        task = load_task(Path(args.path))
+    except TaskContractError as exc:
+        print(f"INVALID: {exc}", file=sys.stderr)
+        return 1
+    runnable = "runnable" if task.environment.world_pin else "valid (unpinned, not runnable)"
+    print(f"valid: {task.id}@{task.task_version} {runnable}")
+    return 0
+
+
+def _tasks_describe(args: argparse.Namespace) -> int:
+    """Print a task the way Harbor would print a task.toml."""
+    try:
+        task = load_task(Path(args.path))
+    except TaskContractError as exc:
+        print(f"INVALID: {exc}", file=sys.stderr)
+        return 1
+    print(task.describe())
+    print()
+    print(task.instruction)
+    return 0
+
+
+def _datasets_validate(args: argparse.Namespace) -> int:
+    """Load a dataset and every task it names."""
+    try:
+        dataset = load_dataset(Path(args.path))
+    except TaskContractError as exc:
+        print(f"INVALID: {exc}", file=sys.stderr)
+        return 1
+    print(
+        f"valid: {dataset.id}@{dataset.dataset_version} "
+        f"{len(dataset.tasks)} task(s), headline {dataset.headline}"
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser."""
     parser = argparse.ArgumentParser(
         prog="or-audit",
-        description="Vendor-neutral robotic surgical skill and safety attestation.",
+        description="Eval harness for procedural medical AI (Harbor analog). "
+        "Also still runs the synthetic credentialing demo.",
     )
     parser.add_argument("--version", action="version", version=PACKAGE_VERSION)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -169,6 +198,21 @@ def build_parser() -> argparse.ArgumentParser:
     describe.add_argument("--min-proficiency", type=float, default=0.85)
     describe.add_argument("--min-items", type=int, default=5)
     describe.set_defaults(func=_describe_rule)
+
+    tasks = sub.add_parser("tasks", help="validate or describe a Harbor-shaped eval task")
+    tasks_sub = tasks.add_subparsers(dest="tasks_command", required=True)
+    tasks_validate = tasks_sub.add_parser("validate", help="load and check a task directory")
+    tasks_validate.add_argument("path", help="task directory or task.toml")
+    tasks_validate.set_defaults(func=_tasks_validate)
+    tasks_describe = tasks_sub.add_parser("describe", help="print a task's contract")
+    tasks_describe.add_argument("path", help="task directory or task.toml")
+    tasks_describe.set_defaults(func=_tasks_describe)
+
+    datasets = sub.add_parser("datasets", help="validate a dataset of eval tasks")
+    datasets_sub = datasets.add_subparsers(dest="datasets_command", required=True)
+    datasets_validate = datasets_sub.add_parser("validate", help="load a dataset and its tasks")
+    datasets_validate.add_argument("path", help="dataset directory or dataset.toml")
+    datasets_validate.set_defaults(func=_datasets_validate)
 
     return parser
 
