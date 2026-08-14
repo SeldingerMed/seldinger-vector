@@ -6,9 +6,12 @@ Three commands, each answering a question someone actually asks:
     Does the whole chain work? Runs synthetic data end to end and prints the
     credentialing report and the audit summary.
 ``verify-audit``
-    Is this audit log intact? Verifies a chain, optionally against an
-    externally pinned head hash -- which is the only way tail truncation is
-    detectable.
+    Is this audit log intact? Verifies a chain against an externally pinned
+    head hash, which is the only way tail truncation is detectable. Without a
+    pin it exits 3 rather than 0: a clean exit code from a check that could not
+    see truncation would be read by a script as a full pass, and the pin's
+    provenance is the entire security property. ``--allow-unpinned`` is the
+    explicit acknowledgement.
 ``describe-rule``
     What rule will be applied? Prints the decision rule for publication before
     a pilot, as PLAN.md section 7.2 requires.
@@ -97,6 +100,14 @@ def _verify_audit(args: argparse.Namespace) -> int:
             "detectable from the chain alone; pin the head externally for this "
             "check to mean anything."
         )
+        if not args.allow_unpinned:
+            print(
+                "  INCOMPLETE: refusing to report a clean result from an "
+                "unpinned check. Supply --expected-head, or --allow-unpinned to "
+                "acknowledge that truncation was not checked.",
+                file=sys.stderr,
+            )
+            return 3
     return 0
 
 
@@ -134,6 +145,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--expected-head", help="externally pinned head hash; required to detect truncation"
     )
     verify.add_argument("--expected-length", type=int, help="externally pinned entry count")
+    verify.add_argument(
+        "--allow-unpinned",
+        action="store_true",
+        help=(
+            "accept a verification with no pinned head. Exits 3 without this, "
+            "because an unpinned check cannot detect truncation and a clean "
+            "exit code would overstate what was verified."
+        ),
+    )
     verify.set_defaults(func=_verify_audit)
 
     describe = sub.add_parser("describe-rule", help="print a decision rule for publication")

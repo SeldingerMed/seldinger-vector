@@ -193,9 +193,11 @@ class LearningCurve(BaseModel):
         delta = sum(late) / len(late) - sum(early) / len(early)
         direction = "improving" if delta > 0.05 else "declining" if delta < -0.05 else "flat"
         return (
-            f"{direction}: first third {sum(early) / len(early):.0%}, "
-            f"last third {sum(late) / len(late):.0%} "
-            f"(difference of means, not a fitted trend)"
+            f"{direction}: first third {sum(early) / len(early):.0%} "
+            f"(n={len(early)}), last third {sum(late) / len(late):.0%} "
+            f"(n={len(late)}) across {len(usable)} assessable episodes. "
+            f"Difference of means, not a fitted trend; with these counts it is "
+            f"a direction, not an effect size."
         )
 
 

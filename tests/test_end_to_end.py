@@ -19,7 +19,7 @@ import pytest
 from or_audit.audit.trail import AuditAction
 from or_audit.cli import main
 from or_audit.demo import run_demo, synthetic_source
-from or_audit.domain.enums import DeidStatus, Determination, GateStatus
+from or_audit.domain.enums import DeidStatus, Determination, GateStatus, MediaKind
 from or_audit.errors import AuditChainError, DeidentificationBoundaryError
 from or_audit.media.frames import NpzFrameSource
 
@@ -233,21 +233,21 @@ class TestCli:
             ]
         )
         capsys.readouterr()
-        assert main(["verify-audit", str(log)]) == 0
+        assert main(["verify-audit", str(log), "--allow-unpinned"]) == 0
         assert "intact" in capsys.readouterr().out
 
     def test_verify_audit_warns_without_a_pinned_head(self, capsys, tmp_path):
         log = tmp_path / "audit.jsonl"
         main(["demo", "--episodes", "1", "--workdir", str(tmp_path / "w"), "--audit-log", str(log)])
         capsys.readouterr()
-        main(["verify-audit", str(log)])
+        main(["verify-audit", str(log), "--allow-unpinned"])
         assert "Tail truncation is not detectable" in capsys.readouterr().out
 
     def test_verify_audit_detects_truncation_with_a_pinned_head(self, capsys, tmp_path):
         log = tmp_path / "audit.jsonl"
         main(["demo", "--episodes", "1", "--workdir", str(tmp_path / "w"), "--audit-log", str(log)])
         capsys.readouterr()
-        main(["verify-audit", str(log)])
+        main(["verify-audit", str(log), "--allow-unpinned"])
         head = capsys.readouterr().out.split("head ")[1].split()[0]
         lines = log.read_text(encoding="utf-8").splitlines()
         log.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
@@ -262,3 +262,65 @@ class TestCli:
         out = capsys.readouterr().out
         assert "DecisionRule 1" in out
         assert "85%" in out
+
+
+class TestHardeningFromReview:
+    """Follow-ups from the end-to-end review."""
+
+    def test_unpinned_verification_does_not_exit_clean(self, capsys, tmp_path):
+        """The pin's provenance is the security property.
+
+        A zero exit from a check that could not detect truncation would be read
+        by a script as a full pass.
+        """
+        log = tmp_path / "audit.jsonl"
+        main(["demo", "--episodes", "1", "--workdir", str(tmp_path / "w"), "--audit-log", str(log)])
+        capsys.readouterr()
+        assert main(["verify-audit", str(log)]) == 3
+        captured = capsys.readouterr()
+        assert "INCOMPLETE" in captured.err
+
+    def test_unpinned_verification_can_be_acknowledged_explicitly(self, capsys, tmp_path):
+        log = tmp_path / "audit.jsonl"
+        main(["demo", "--episodes", "1", "--workdir", str(tmp_path / "w"), "--audit-log", str(log)])
+        capsys.readouterr()
+        assert main(["verify-audit", str(log), "--allow-unpinned"]) == 0
+
+    def test_a_pinned_verification_exits_clean(self, capsys, tmp_path):
+        log = tmp_path / "audit.jsonl"
+        main(["demo", "--episodes", "1", "--workdir", str(tmp_path / "w"), "--audit-log", str(log)])
+        out = capsys.readouterr().out
+        head = out.split("head         ")[1].split()[0]
+        assert main(["verify-audit", str(log), "--expected-head", head]) == 0
+
+    def test_the_trend_reports_its_sample_size(self, outcome):
+        """A direction on two-versus-two episodes must not read as an effect size."""
+        result, _ = outcome
+        trend = result.report.curve.trend()
+        assert "n=" in trend
+        assert "not an effect size" in trend
+
+    def test_coarse_policy_media_is_refused_downstream_not_merely_unattested(self):
+        """The 'analyse but cannot attest' rule holds at the next stage too."""
+        from or_audit.deid.pipeline import analyze
+        from or_audit.deid.policy import DeidPolicy
+        from or_audit.demo import synthetic_source
+        from or_audit.domain.entities import MediaAsset
+        from or_audit.domain.ids import new_episode_id, new_media_asset_id
+
+        source = synthetic_source()
+        asset = MediaAsset(
+            id=new_media_asset_id(),
+            episode_id=new_episode_id(),
+            kind=MediaKind.ENDOSCOPIC_VIDEO,
+            raw_uri="s3://raw/case.mp4",
+            sha256="a" * 64,
+            duration_seconds=9.0,
+            deid_status=DeidStatus.RAW,
+        )
+        coarse = DeidPolicy(overlay_block_px=32, overlay_recall_justification="triage")
+        analysed, _ = analyze(asset, source, coarse)
+        assert analysed.deid_status is DeidStatus.IN_PROGRESS
+        # Nothing past analysis accepts it: the read gate refuses IN_PROGRESS.
+        with pytest.raises(DeidentificationBoundaryError):
+            analysed.require_readable()
