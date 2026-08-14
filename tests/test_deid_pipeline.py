@@ -17,7 +17,7 @@ from or_audit.audit.trail import Actor, ActorKind, AuditAction, AuditTrail
 from or_audit.deid.attestation import DeidAttestation
 from or_audit.deid.pipeline import analyze, default_disposition, discard, redact
 from or_audit.deid.plan import PlannedBox, PlannedSegment, RedactionPlan, apply_plan
-from or_audit.deid.policy import AudioDisposition, DeidPolicy
+from or_audit.deid.policy import AudioDisposition, DeidPolicy, OverlayBoundValidation
 from or_audit.deid.writer import NpzFrameWriter
 from or_audit.domain.entities import MediaAsset
 from or_audit.domain.enums import DeidStatus, MediaKind
@@ -32,7 +32,18 @@ CLOCK = datetime(2026, 3, 4, 15, 0, tzinfo=UTC)
 
 @pytest.fixture
 def policy() -> DeidPolicy:
-    return DeidPolicy()
+    """A policy cleared to attest.
+
+    Attestation requires a recorded overlay-bound measurement (PLAN.md V-10);
+    the bare default deliberately cannot attest. These tests exercise the
+    attestation mechanics, so they use a validated policy and the gate itself is
+    covered in tests/test_deid_leaks.py.
+    """
+    return DeidPolicy(
+        overlay_bound_validation=OverlayBoundValidation(
+            measured_min_identifier_px=22, source="capture survey 2026-02"
+        )
+    )
 
 
 @pytest.fixture

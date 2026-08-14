@@ -17,7 +17,12 @@ from or_audit.deid.detectors import (
 )
 from or_audit.deid.pipeline import analyze, default_disposition, discard, redact
 from or_audit.deid.plan import PlannedBox, PlannedSegment, RedactionPlan, apply_plan
-from or_audit.deid.policy import SAFE_OVERLAY_MIN_PX, AudioDisposition, DeidPolicy
+from or_audit.deid.policy import (
+    SAFE_OVERLAY_MIN_PX,
+    AudioDisposition,
+    DeidPolicy,
+    OverlayBoundValidation,
+)
 from or_audit.deid.writer import FrameWriter, NpzFrameWriter, WrittenOutput
 
 __all__ = [
@@ -27,6 +32,7 @@ __all__ = [
     "DeidPolicy",
     "FrameWriter",
     "NpzFrameWriter",
+    "OverlayBoundValidation",
     "PixelBox",
     "PlannedBox",
     "PlannedSegment",

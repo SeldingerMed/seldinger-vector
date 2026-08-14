@@ -333,22 +333,45 @@ def _require_analysed(asset: MediaAsset) -> None:
 def _require_attesting_policy(asset: MediaAsset, policy: DeidPolicy) -> None:
     """Refuse to attest under a policy that cannot guarantee raster coverage.
 
-    A recorded justification permits *analysing* with a coarse overlay grid. It
-    does not make the resulting media clean, and no string does. Attestation is
-    a claim that identifiers were removed; making it under a configuration whose
-    own recall bound admits thinner text could survive would be asserting
-    something the pipeline knows it did not establish.
+    Attestation is a claim that identifiers were removed. Two things must hold
+    before the pipeline will make it: the detector's recall bound must sit at or
+    below the ceiling any plausible identifier exceeds, and that bound must be
+    backed by a measurement of the capture hardware actually in scope.
 
-    The remedy is a finer grid, not a better sentence.
+    Neither substitutes for the other, and no string substitutes for either. A
+    recorded justification permits *analysing* with a coarse grid; it does not
+    make the media clean. A fine grid with no measurement is still an assumption
+    about how thin real identifiers get -- PLAN.md V-10, open -- and an
+    attestation resting on an open assumption is not one to make.
     """
-    if not policy.guarantees_overlay_coverage:
+    if policy.overlay_min_detectable_px > SAFE_OVERLAY_MIN_PX:
         msg = (
             f"policy cannot attest media {asset.id}: its overlay grid guarantees "
             f"detection only down to {policy.overlay_min_detectable_px}px, above "
-            f"the {SAFE_OVERLAY_MIN_PX}px attesting bound, so burned-in text "
-            f"thinner than that may remain. Analyse with this policy if useful, "
-            f"but re-run with a finer overlay_block_px before attesting -- a "
-            f"justification records the trade, it does not remove the risk"
+            f"the {SAFE_OVERLAY_MIN_PX}px ceiling, so burned-in text thinner than "
+            f"that may remain. Analyse with this policy if useful, but re-run "
+            f"with a finer overlay_block_px before attesting -- a justification "
+            f"records the trade, it does not remove the risk"
+        )
+        raise DeidentificationBoundaryError(msg)
+    validation = policy.overlay_bound_validation
+    if validation is None:
+        msg = (
+            f"policy cannot attest media {asset.id}: its overlay recall bound of "
+            f"{policy.overlay_min_detectable_px}px has not been validated against "
+            f"the capture hardware in scope (PLAN.md V-10, open). A fine grid is "
+            f"an assumption about how thin real identifiers get, not a "
+            f"measurement of it. Record the measurement in "
+            f"overlay_bound_validation, or analyse without attesting"
+        )
+        raise DeidentificationBoundaryError(msg)
+    if validation.measured_min_identifier_px < policy.overlay_min_detectable_px:
+        msg = (
+            f"policy cannot attest media {asset.id}: the recorded survey found "
+            f"identifiers as thin as {validation.measured_min_identifier_px}px, "
+            f"below this configuration's {policy.overlay_min_detectable_px}px "
+            f"recall bound, so the detector cannot be relied on to have found "
+            f"them. Lower overlay_block_px until the bound clears the measurement"
         )
         raise DeidentificationBoundaryError(msg)
 

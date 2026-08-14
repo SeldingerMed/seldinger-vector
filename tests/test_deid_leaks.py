@@ -15,7 +15,7 @@ import pytest
 from or_audit.deid.detectors import detect_out_of_body
 from or_audit.deid.pipeline import analyze, redact
 from or_audit.deid.plan import PlannedSegment, RedactionPlan, apply_plan
-from or_audit.deid.policy import DeidPolicy
+from or_audit.deid.policy import DeidPolicy, OverlayBoundValidation
 from or_audit.deid.writer import NpzFrameWriter, WrittenOutput
 from or_audit.domain.entities import MediaAsset
 from or_audit.domain.enums import DeidStatus, MediaKind
@@ -24,6 +24,15 @@ from or_audit.errors import DeidentificationBoundaryError, DomainInvariantError
 from or_audit.media.frames import Frame, InMemoryFrameSource
 
 FRAME_RATE = 30.0
+
+#: A policy cleared to attest. Attestation requires a recorded overlay-bound
+#: measurement (PLAN.md V-10), so the bare default cannot; tests that exercise
+#: the attestation mechanics rather than the gate itself use this.
+ATTESTING_POLICY = DeidPolicy(
+    overlay_bound_validation=OverlayBoundValidation(
+        measured_min_identifier_px=22, source="capture survey 2026-02"
+    )
+)
 
 
 def in_body() -> np.ndarray:
@@ -139,7 +148,7 @@ class TestPlanIsBoundToItsSource:
         # three identical frames are entirely static, which the overlay
         # detector correctly flags. The attack being closed here is the
         # frame-count mismatch, so the plan needs to be a real no-op.
-        policy = DeidPolicy(redact_overlays=False)
+        policy = ATTESTING_POLICY.model_copy(update={"redact_overlays": False})
         clean = InMemoryFrameSource([in_body()] * 3, frame_rate=FRAME_RATE)
         dirty = InMemoryFrameSource([in_body()] * 60 + [out_of_body()] * 30, frame_rate=FRAME_RATE)
         analysed, noop_plan = analyze(self._asset(), clean, policy)
@@ -157,14 +166,14 @@ class TestPlanIsBoundToItsSource:
     def test_plan_from_a_different_frame_rate_is_refused(self, tmp_path):
         frames = [in_body()] * 30
         analysed, plan = analyze(
-            self._asset(), InMemoryFrameSource(frames, frame_rate=30.0), DeidPolicy()
+            self._asset(), InMemoryFrameSource(frames, frame_rate=30.0), ATTESTING_POLICY
         )
         with pytest.raises(DeidentificationBoundaryError, match="would not line up"):
             redact(
                 analysed,
                 InMemoryFrameSource(frames, frame_rate=60.0),
                 plan,
-                DeidPolicy(),
+                ATTESTING_POLICY,
                 NpzFrameWriter(tmp_path / "o.npz"),
                 performed_by="deid-pipeline",
             )
@@ -200,7 +209,7 @@ class TestRedactRequiresAnalysis:
                 raw,
                 source,
                 plan,
-                DeidPolicy(),
+                ATTESTING_POLICY,
                 NpzFrameWriter(tmp_path / "o.npz"),
                 performed_by="deid-pipeline",
             )
@@ -216,12 +225,17 @@ class TestRedactRequiresAnalysis:
             sha256="a" * 64,
             deid_status=DeidStatus.RAW,
         )
-        analysed, plan = analyze(raw, source, DeidPolicy())
+        validated = DeidPolicy(
+            overlay_bound_validation=OverlayBoundValidation(
+                measured_min_identifier_px=22, source="capture survey 2026-02"
+            )
+        )
+        analysed, plan = analyze(raw, source, validated)
         redact(
             analysed,
             source,
             plan,
-            DeidPolicy(),
+            validated,
             NpzFrameWriter(tmp_path / "first.npz"),
             performed_by="deid-pipeline",
         )
@@ -230,7 +244,7 @@ class TestRedactRequiresAnalysis:
                 raw,
                 source,
                 plan,
-                DeidPolicy(),
+                validated,
                 NpzFrameWriter(tmp_path / "second.npz"),
                 performed_by="deid-pipeline",
             )
@@ -283,6 +297,12 @@ class TestWriterDigestIsNotTrusted:
                 frame_rate=frame_rate,
             )
 
+    POLICY = DeidPolicy(
+        overlay_bound_validation=OverlayBoundValidation(
+            measured_min_identifier_px=22, source="capture survey 2026-02"
+        )
+    )
+
     def _analysed(self) -> tuple[MediaAsset, InMemoryFrameSource, RedactionPlan]:
         source = InMemoryFrameSource([in_body()] * 30, frame_rate=FRAME_RATE)
         raw = MediaAsset(
@@ -293,7 +313,7 @@ class TestWriterDigestIsNotTrusted:
             sha256="a" * 64,
             deid_status=DeidStatus.RAW,
         )
-        analysed, plan = analyze(raw, source, DeidPolicy())
+        analysed, plan = analyze(raw, source, self.POLICY)
         return analysed, source, plan
 
     def test_fabricated_digest_is_caught(self, tmp_path):
@@ -303,7 +323,7 @@ class TestWriterDigestIsNotTrusted:
                 analysed,
                 source,
                 plan,
-                DeidPolicy(),
+                self.POLICY,
                 self._LyingWriter(tmp_path / "o.npz"),
                 performed_by="deid-pipeline",
             )
@@ -315,7 +335,7 @@ class TestWriterDigestIsNotTrusted:
                 analysed,
                 source,
                 plan,
-                DeidPolicy(),
+                self.POLICY,
                 self._PhantomWriter(),
                 performed_by="deid-pipeline",
             )
@@ -328,7 +348,7 @@ class TestWriterDigestIsNotTrusted:
                 analysed,
                 source,
                 plan,
-                DeidPolicy(),
+                self.POLICY,
                 self._RemoteWriter(),
                 performed_by="deid-pipeline",
             )
@@ -347,7 +367,7 @@ class TestWriterDigestIsNotTrusted:
             analysed,
             source,
             plan,
-            DeidPolicy(),
+            self.POLICY,
             NpzFrameWriter(tmp_path / "o.npz"),
             performed_by="deid-pipeline",
         )
@@ -411,7 +431,7 @@ class TestSamplingRecallIsBoundedAndDeclared:
         assert leaked_frame_count(pattern, stride=1) == 0
 
     def test_default_policy_uses_full_recall(self):
-        policy = DeidPolicy()
+        policy = ATTESTING_POLICY
         assert policy.analysis_stride_frames == 1
         assert policy.out_of_body_min_duration_s == 0.0
 
@@ -425,7 +445,7 @@ class TestSamplingRecallIsBoundedAndDeclared:
             sha256="a" * 64,
             deid_status=DeidStatus.RAW,
         )
-        _, plan = analyze(asset, source, DeidPolicy())
+        _, plan = analyze(asset, source, ATTESTING_POLICY)
         assert plan.is_recall_bounded is False
         assert plan.min_detectable_event_seconds == pytest.approx(1 / FRAME_RATE)
 
@@ -490,14 +510,14 @@ class TestTotalRedactionRoutesToDiscard:
             sha256="a" * 64,
             deid_status=DeidStatus.RAW,
         )
-        analysed, plan = analyze(asset, source, DeidPolicy())
+        analysed, plan = analyze(asset, source, ATTESTING_POLICY)
         assert plan.drops_everything
         with pytest.raises(DeidentificationBoundaryError, match="discard"):
             redact(
                 analysed,
                 source,
                 plan,
-                DeidPolicy(),
+                ATTESTING_POLICY,
                 NpzFrameWriter(tmp_path / "o.npz"),
                 performed_by="deid-pipeline",
             )
@@ -516,12 +536,12 @@ class TestWriterPathResolution:
             sha256="a" * 64,
             deid_status=DeidStatus.RAW,
         )
-        analysed, plan = analyze(asset, source, DeidPolicy())
+        analysed, plan = analyze(asset, source, ATTESTING_POLICY)
         final, attestation = redact(
             analysed,
             source,
             plan,
-            DeidPolicy(),
+            ATTESTING_POLICY,
             NpzFrameWriter(tmp_path / "out.bin"),
             performed_by="deid-pipeline",
         )
@@ -578,7 +598,7 @@ class TestCoarseSamplingRequiresInformedConsent:
         assert policy.analysis_stride_frames == 15
 
     def test_the_default_needs_no_justification(self):
-        assert DeidPolicy().sampling_justification is None
+        assert ATTESTING_POLICY.sampling_justification is None
 
 
 class TestRedactionIsExactNotMerelySafe:
@@ -738,10 +758,17 @@ class TestOverlayRecallBoundIsPolicedNotJustDocumented:
     read as a pass.
     """
 
-    def test_the_default_configuration_guarantees_legible_text(self):
+    def test_the_default_configuration_cannot_attest(self):
+        """The alpha is non-attesting by default while V-10 is open.
+
+        An earlier version let a bound of 8px attest and refused 16px. Both rest
+        on the same unmeasured assumption about how thin real identifiers get,
+        so the distinction asserted a confidence nothing supported.
+        """
         policy = DeidPolicy()
         assert policy.overlay_min_detectable_px == 8
-        assert policy.overlay_recall_justification is None
+        assert policy.overlay_bound_validation is None
+        assert not policy.guarantees_overlay_coverage
 
     @pytest.mark.parametrize(("block", "fraction"), [(32, 0.5), (16, 1.0), (64, 0.25), (24, 0.5)])
     def test_a_coarse_grid_without_a_justification_is_refused(self, block, fraction):
@@ -819,8 +846,23 @@ class TestOverlayRecallBoundIsPolicedNotJustDocumented:
                 performed_by="deid-pipeline",
             )
 
-    def test_the_default_policy_can_attest(self):
-        assert DeidPolicy().guarantees_overlay_coverage
+    def test_a_validated_default_policy_can_attest(self):
+        assert DeidPolicy(
+            overlay_bound_validation=OverlayBoundValidation(
+                measured_min_identifier_px=22, source="capture survey 2026-02"
+            )
+        ).guarantees_overlay_coverage
+
+    def test_validation_cannot_rescue_a_grid_above_the_ceiling(self):
+        """Both conditions are required; neither substitutes for the other."""
+        policy = DeidPolicy(
+            overlay_block_px=32,
+            overlay_recall_justification="triage",
+            overlay_bound_validation=OverlayBoundValidation(
+                measured_min_identifier_px=22, source="capture survey 2026-02"
+            ),
+        )
+        assert not policy.guarantees_overlay_coverage
 
     def test_the_bound_reaches_the_plan_and_the_attestation(self, tmp_path):
         """The artifact must not read as a claim of total coverage."""
@@ -833,7 +875,12 @@ class TestOverlayRecallBoundIsPolicedNotJustDocumented:
             sha256="a" * 64,
             deid_status=DeidStatus.RAW,
         )
-        policy = DeidPolicy(overlay_block_px=8)
+        policy = DeidPolicy(
+            overlay_block_px=8,
+            overlay_bound_validation=OverlayBoundValidation(
+                measured_min_identifier_px=22, source="capture survey 2026-02"
+            ),
+        )
         analysed, plan = analyze(asset, source, policy)
         assert plan.overlay_min_detectable_px == 4
         _, attestation = redact(
@@ -845,3 +892,95 @@ class TestOverlayRecallBoundIsPolicedNotJustDocumented:
             performed_by="deid-pipeline",
         )
         assert attestation.summary()["overlay_min_detectable_px"] == 4
+
+
+class TestAttestationRequiresAMeasurementNotAnAssumption:
+    """PLAN.md V-10 is open, so the alpha does not attest by default.
+
+    The rule that a coarse grid cannot attest was right, but it was applied
+    inconsistently: a bound of 8px attested while 16px did not, and both rested
+    on the same unmeasured assumption about the thinnest identifier a capture
+    system renders. Attestation now needs a recorded measurement as well as a
+    bound under the ceiling.
+    """
+
+    def _asset(self) -> MediaAsset:
+        return MediaAsset(
+            id=new_media_asset_id(),
+            episode_id=new_episode_id(),
+            kind=MediaKind.ENDOSCOPIC_VIDEO,
+            raw_uri="s3://raw/case.mp4",
+            sha256="a" * 64,
+            deid_status=DeidStatus.RAW,
+        )
+
+    def test_the_default_policy_analyses_but_cannot_attest(self, tmp_path):
+        source = InMemoryFrameSource([in_body()] * 30, frame_rate=FRAME_RATE)
+        analysed, plan = analyze(self._asset(), source, DeidPolicy())
+        assert analysed.deid_status is DeidStatus.IN_PROGRESS
+        with pytest.raises(DeidentificationBoundaryError, match="has not been validated"):
+            redact(
+                analysed,
+                source,
+                plan,
+                DeidPolicy(),
+                NpzFrameWriter(tmp_path / "o.npz"),
+                performed_by="deid-pipeline",
+            )
+
+    def test_the_error_names_V10_and_the_remedy(self, tmp_path):
+        source = InMemoryFrameSource([in_body()] * 30, frame_rate=FRAME_RATE)
+        analysed, plan = analyze(self._asset(), source, DeidPolicy())
+        with pytest.raises(DeidentificationBoundaryError) as caught:
+            redact(
+                analysed,
+                source,
+                plan,
+                DeidPolicy(),
+                NpzFrameWriter(tmp_path / "o.npz"),
+                performed_by="deid-pipeline",
+            )
+        assert "V-10" in str(caught.value)
+        assert "overlay_bound_validation" in str(caught.value)
+
+    def test_a_validated_policy_attests(self, tmp_path):
+        validated = DeidPolicy(
+            overlay_bound_validation=OverlayBoundValidation(
+                measured_min_identifier_px=22, source="capture survey 2026-02"
+            )
+        )
+        source = InMemoryFrameSource([in_body()] * 30, frame_rate=FRAME_RATE)
+        analysed, plan = analyze(self._asset(), source, validated)
+        final, attestation = redact(
+            analysed,
+            source,
+            plan,
+            validated,
+            NpzFrameWriter(tmp_path / "o.npz"),
+            performed_by="deid-pipeline",
+        )
+        assert final.deid_status is DeidStatus.ATTESTED
+        assert attestation.summary()["overlay_bound_measured_min_px"] == 22
+        assert attestation.summary()["overlay_bound_validation_source"] == "capture survey 2026-02"
+
+    def test_the_attestation_carries_the_measurement_it_rests_on(self, tmp_path):
+        """A reader must be able to see what the coverage claim is grounded in."""
+        validated = DeidPolicy(
+            overlay_bound_validation=OverlayBoundValidation(
+                measured_min_identifier_px=22, source="capture survey 2026-02"
+            )
+        )
+        source = InMemoryFrameSource([in_body()] * 30, frame_rate=FRAME_RATE)
+        analysed, plan = analyze(self._asset(), source, validated)
+        _, attestation = redact(
+            analysed,
+            source,
+            plan,
+            validated,
+            NpzFrameWriter(tmp_path / "o.npz"),
+            performed_by="deid-pipeline",
+        )
+        summary = attestation.summary()
+        assert summary["overlay_min_detectable_px"] == 8
+        assert summary["overlay_bound_measured_min_px"] == 22
+        assert summary["overlay_bound_validation_source"] == "capture survey 2026-02"

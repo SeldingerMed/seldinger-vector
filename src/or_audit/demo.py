@@ -25,7 +25,7 @@ import numpy as np
 from or_audit.audit.trail import Actor, ActorKind, AuditTrail
 from or_audit.decision.rule import DecisionRule
 from or_audit.deid.pipeline import analyze, redact
-from or_audit.deid.policy import DeidPolicy
+from or_audit.deid.policy import DeidPolicy, OverlayBoundValidation
 from or_audit.deid.writer import NpzFrameWriter
 from or_audit.domain.entities import Episode, Institution, Procedure, Surgeon
 from or_audit.domain.enums import Jurisdiction, SkillBand, ThresholdOwner
@@ -161,7 +161,19 @@ def run_demo(workdir: Path, *, episodes: int = 8) -> DemoOutcome:
         threshold_owner=ThresholdOwner.CUSTOMER,
         threshold_provenance="Demo credentialing committee minute 2026-02-11",
     )
-    policy = DeidPolicy()
+    policy = DeidPolicy(
+        # Truthful for this data and only this data: the synthetic frames are
+        # generated below with a 16-pixel-tall overlay, so the recall bound is
+        # measured rather than assumed. A real deployment must substitute its
+        # own capture survey (PLAN.md V-10); it may not reuse this string.
+        overlay_bound_validation=OverlayBoundValidation(
+            measured_min_identifier_px=16,
+            source=(
+                "synthetic demo frames: overlay generated at 16px tall by "
+                "or_audit.demo.synthetic_source"
+            ),
+        )
+    )
 
     results: list[AssessmentResult] = []
     dropped = 0
