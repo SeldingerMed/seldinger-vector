@@ -35,7 +35,7 @@ from or_audit.deid.detectors import (
     detect_static_overlays,
 )
 from or_audit.deid.plan import PlannedBox, PlannedSegment, RedactionPlan, apply_plan
-from or_audit.deid.policy import AudioDisposition, DeidPolicy
+from or_audit.deid.policy import SAFE_OVERLAY_MIN_PX, AudioDisposition, DeidPolicy
 from or_audit.deid.writer import FrameWriter, WrittenOutput
 from or_audit.domain.entities import MediaAsset
 from or_audit.domain.enums import DeidStatus, MediaKind
@@ -118,6 +118,7 @@ def analyze(
                 stride=policy.overlay_stride_frames,
                 max_std=policy.overlay_max_std,
                 block=policy.overlay_block_px,
+                min_static_fraction=policy.overlay_min_static_fraction,
             )
         )
 
@@ -127,6 +128,7 @@ def analyze(
         source_frame_count=source.frame_count,
         source_frame_rate=source.frame_rate,
         analysis_stride_frames=policy.analysis_stride_frames,
+        overlay_min_detectable_px=policy.overlay_min_detectable_px,
         dropped_segments=segments,
         masked_boxes=boxes,
     )
@@ -186,6 +188,7 @@ def redact(
     """
     _reject_settled(asset)
     _require_analysed(asset)
+    _require_attesting_policy(asset, policy)
     _require_plan_matches_source(asset, plan, source)
     _reject_total_redaction(asset, plan)
     written = writer.write(apply_plan(source, plan), frame_rate=plan.source_frame_rate)
@@ -249,6 +252,7 @@ def discard(
             source_frame_count=0,
             source_frame_rate=1.0,
             analysis_stride_frames=policy.analysis_stride_frames,
+            overlay_min_detectable_px=policy.overlay_min_detectable_px,
         ),
         source_sha256=asset.sha256,
         output_sha256=None,
@@ -322,6 +326,29 @@ def _require_analysed(asset: MediaAsset) -> None:
             f"media {asset.id} is {asset.deid_status.value}; redaction requires "
             f"an analysed asset, so call analyze() first and redact the asset "
             f"it returns"
+        )
+        raise DeidentificationBoundaryError(msg)
+
+
+def _require_attesting_policy(asset: MediaAsset, policy: DeidPolicy) -> None:
+    """Refuse to attest under a policy that cannot guarantee raster coverage.
+
+    A recorded justification permits *analysing* with a coarse overlay grid. It
+    does not make the resulting media clean, and no string does. Attestation is
+    a claim that identifiers were removed; making it under a configuration whose
+    own recall bound admits thinner text could survive would be asserting
+    something the pipeline knows it did not establish.
+
+    The remedy is a finer grid, not a better sentence.
+    """
+    if not policy.guarantees_overlay_coverage:
+        msg = (
+            f"policy cannot attest media {asset.id}: its overlay grid guarantees "
+            f"detection only down to {policy.overlay_min_detectable_px}px, above "
+            f"the {SAFE_OVERLAY_MIN_PX}px attesting bound, so burned-in text "
+            f"thinner than that may remain. Analyse with this policy if useful, "
+            f"but re-run with a finer overlay_block_px before attesting -- a "
+            f"justification records the trade, it does not remove the risk"
         )
         raise DeidentificationBoundaryError(msg)
 

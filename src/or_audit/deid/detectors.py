@@ -223,6 +223,7 @@ def detect_static_overlays(
     max_std: float = 2.0,
     block: int = 16,
     min_blocks: int = 1,
+    min_static_fraction: float = 0.5,
 ) -> tuple[PixelBox, ...]:
     """Find regions that do not change over time.
 
@@ -231,18 +232,34 @@ def detect_static_overlays(
     scored per pixel, reduced to a coarse block grid, and contiguous static
     blocks are merged into boxes.
 
-    A caveat worth stating rather than burying: a genuinely motionless region
-    of anatomy -- a static retractor, a letterboxed border -- also reads as
-    static. Over-inclusion is the intended failure direction. Redacting a few
-    extra blocks costs pixels; missing an MRN costs a breach.
+    Two caveats worth stating rather than burying.
+
+    A genuinely motionless region of anatomy -- a static retractor, a
+    letterboxed border -- also reads as static. Over-inclusion is the intended
+    failure direction: redacting a few extra blocks costs pixels, missing an
+    MRN costs a breach.
+
+    **Recall is bounded by ``block``.** An overlay covering less than
+    ``min_static_fraction`` of every block it touches seeds no block and is not
+    detected at all. With the defaults that means text thinner than roughly
+    half a 16-pixel block in either axis can be missed. This is a resolution
+    limit, not a bug to be patched around: a caller expecting thin overlays must
+    lower ``block``, at the cost of more work per frame. Sub-block text is rare
+    in practice -- burned-in identifiers are rendered to be read -- but the
+    bound is real and callers are entitled to know it.
 
     Args:
         source: Frames to analyse.
         stride: Analyse every ``stride``-th frame.
         max_std: Per-pixel standard deviation at or below which a pixel counts
             as static. Small but non-zero, to tolerate encoder noise.
-        block: Grid size in pixels for merging.
+        block: Grid size in pixels for merging. This sets the detector's
+            resolution, and therefore its recall bound: see below.
         min_blocks: Discard components smaller than this many blocks.
+        min_static_fraction: Fraction of a block's pixels that must be static
+            for the block to be seeded. Requiring *all* of them -- the original
+            rule -- meant an overlay narrower than one block seeded nothing and
+            was invisible. A majority is the default.
 
     Returns:
         Bounding boxes in ascending ``(top, left)`` order.
@@ -252,6 +269,9 @@ def detect_static_overlays(
         raise ValueError(msg)
     if max_std < 0:
         msg = f"max_std must be non-negative, got {max_std}"
+        raise ValueError(msg)
+    if not 0.0 < min_static_fraction <= 1.0:
+        msg = f"min_static_fraction must be in (0, 1], got {min_static_fraction}"
         raise ValueError(msg)
 
     indices = sample_indices(source.frame_count, stride=stride)
@@ -270,14 +290,28 @@ def detect_static_overlays(
     for row in range(rows):
         for col in range(cols):
             patch = static_mask[row * block : (row + 1) * block, col * block : (col + 1) * block]
-            grid[row, col] = bool(patch.all())
+            grid[row, col] = bool(patch.mean() >= min_static_fraction) if patch.size else False
 
+    # Each component is dilated by one block in every direction before being
+    # converted to pixels.
+    #
+    # A block is only seeded when *every* pixel in it is static, so an overlay
+    # whose edge falls mid-block leaves that block unseeded and its pixels
+    # unmasked. A 40-pixel-wide identifier on a 16-pixel grid seeds columns 0
+    # and 1 and leaves pixels 32-39 visible -- a sliver of a burned-in MRN,
+    # which is the whole thing this detector exists to remove. An end-to-end
+    # test found exactly that.
+    #
+    # Dilation is the right correction rather than a tighter pixel scan: it is
+    # bounded, cheap, and errs toward over-inclusion, which is the direction
+    # this detector documents. Masking one extra block costs pixels of anatomy;
+    # leaving eight columns of an identifier costs a breach.
     boxes = [
         PixelBox(
-            left=min(c for _, c in component) * block,
-            top=min(r for r, _ in component) * block,
-            right=min((max(c for _, c in component) + 1) * block, width),
-            bottom=min((max(r for r, _ in component) + 1) * block, height),
+            left=max((min(c for _, c in component) - 1) * block, 0),
+            top=max((min(r for r, _ in component) - 1) * block, 0),
+            right=min((max(c for _, c in component) + 2) * block, width),
+            bottom=min((max(r for r, _ in component) + 2) * block, height),
         )
         for component in _connected_blocks(grid)
         if len(component) >= min_blocks

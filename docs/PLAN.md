@@ -319,6 +319,7 @@ Claims v1 asserted as fact that are actually **hypotheses with owners and gates.
 | V-6 | TAM: credible buyer count across Segments 1–4 | Not established. Directly determines platform-vs-services (§15, §18). | Commercial lead | Phase 0 |
 | V-7 | Fully-loaded cost per annotated procedure | Not measured. Sets the real meaning of §11's corpus threshold. | Clinical/rater lead | Phase 0 |
 | V-8 | Competitor capability detail (Case Insights metric definitions, scoring rubrics, availability) | Marketing-level description only; specific metrics and rubrics not disclosed publicly. | Commercial lead | Phase 0 — refine via customers who use it |
+| V-10 | **Minimum rendered size of burned-in identifiers across in-scope capture systems** | Not measured. The de-identification overlay detector's recall is bounded by its grid resolution, and `SAFE_OVERLAY_MIN_PX` (8px) is a conservative engineering assumption, not a finding. A configuration coarser than that bound may analyse but is refused attestation. | ML lead + clinical lead | Phase 0 — measure across the capture hardware actually in scope |
 | V-9 | **§11 corpus threshold (the 25,000 figure)** | **Placeholder, not derived.** Chosen only to sit strictly above the Phase 2 target. No power calculation, prevalence estimate, or cost model supports the specific number. Until derived per the §11 rule, condition 1 is not a valid gate. | Clinical/rater lead + ML lead | Phase 0 — publish derivation (power × unit cost × Phase-2 floor) or revert to the Phase 2 figure |
 
 ## 18. Honest framing

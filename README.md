@@ -34,6 +34,7 @@ plan and should not be relaxed without amending it.
 | Abstention is a required output class | `Determination.INDETERMINATE`, `GateStatus.NOT_ASSESSABLE` | A scorer that cannot decline gets forced into false confidence where liability concentrates (§7.2). |
 | Every artifact is versioned and chained | `audit.AuditTrail` | The record must be defensible under challenge (§7.3). |
 | Attestation requires bytes, not assertion | `deid.redact` | The pipeline hashes what its writer wrote; no caller supplies the digest. A status settable by assertion protects nothing (§8). |
+| Analysis and attestation are different claims | `DeidPolicy.guarantees_overlay_coverage` | A coarse overlay grid may analyse but cannot attest. A recorded justification captures the trade; it does not make the media clean. |
 | Platform is data, never a branch | `domain.RobotPlatform` | Vendor-specific behaviour belongs in ingestion adapters only. |
 | Gates cannot collapse to a scalar | `scoring.SafetyGateSet` | `float()`, `int()` and `bool()` raise. Hard gates never average into soft scores (§7.1). |
 | A gate that cannot see cannot clear | `GateStatus.NOT_ASSESSABLE` | Missing or low-confidence evidence never reads as a pass. |

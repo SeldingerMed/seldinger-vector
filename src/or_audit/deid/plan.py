@@ -57,6 +57,9 @@ class RedactionPlan(BaseModel):
     #: plan could possibly have found, and a reader of the attestation is
     #: entitled to know that bound rather than infer completeness.
     analysis_stride_frames: Annotated[int, Field(ge=1)] = 1
+    #: Thinnest overlay the overlay detector was guaranteed to catch, in pixels.
+    #: Carried so an attestation cannot be read as a claim of total coverage.
+    overlay_min_detectable_px: Annotated[int, Field(ge=1)] = 1
     dropped_segments: tuple[PlannedSegment, ...] = ()
     masked_boxes: tuple[PlannedBox, ...] = ()
 
