@@ -64,6 +64,17 @@ DEFAULT_MIN_PANEL_ICC = 0.40
 #: high enough that noise cannot clear it.
 DEFAULT_ABSOLUTE_FLOOR = 0.50
 
+#: Lowest values the protective thresholds may be configured to.
+#:
+#: A gate whose thresholds can be set to zero is not a gate. Review showed the
+#: panel-adequacy and absolute-floor protections could be disabled entirely by
+#: passing near-zero values, which restores the original P0 through
+#: configuration rather than through code. These bounds are permissive enough
+#: for a programme with a genuinely noisier rubric to justify a lower bar, and
+#: tight enough that the bar cannot be removed.
+MIN_CONFIGURABLE_PANEL_ICC = 0.20
+MIN_CONFIGURABLE_ABSOLUTE_FLOOR = 0.30
+
 
 class Endpoint(StrEnum):
     """Which endpoint an agreement figure describes."""
@@ -193,6 +204,23 @@ def agreement_figure(
     if not 0.0 < relative_target <= 1.0:
         msg = f"relative_target must be in (0, 1], got {relative_target}"
         raise ScoreContractError(msg)
+    # Bounded here as well as on AgreementGate: a figure built with disabled
+    # protections reports passes=True on its own, and callers read that
+    # property directly without going through the gate.
+    if not MIN_CONFIGURABLE_PANEL_ICC <= min_panel_icc < 1.0:
+        msg = (
+            f"min_panel_icc must be at least {MIN_CONFIGURABLE_PANEL_ICC}: a panel "
+            f"adequacy threshold near zero disables the protection and lets a "
+            f"scorer uncorrelated with truth pass, got {min_panel_icc}"
+        )
+        raise ScoreContractError(msg)
+    if not MIN_CONFIGURABLE_ABSOLUTE_FLOOR <= absolute_floor < 1.0:
+        msg = (
+            f"absolute_floor must be at least {MIN_CONFIGURABLE_ABSOLUTE_FLOOR}: a "
+            f"floor near zero lets a degraded panel drive the requirement to zero, "
+            f"got {absolute_floor}"
+        )
+        raise ScoreContractError(msg)
     panel = [np.asarray(r, dtype=np.float64) for r in expert_panel]
     if len(panel) < 2:
         msg = (
@@ -233,9 +261,13 @@ class AgreementGate(BaseModel):
     version: str = "1"
     relative_target: Annotated[float, Field(gt=0.0, le=1.0)] = DEFAULT_RELATIVE_TARGET
     #: Panel agreement below which no scorer can pass, however it performs.
-    min_panel_icc: Annotated[float, Field(gt=0.0, lt=1.0)] = DEFAULT_MIN_PANEL_ICC
+    min_panel_icc: Annotated[float, Field(ge=MIN_CONFIGURABLE_PANEL_ICC, lt=1.0)] = (
+        DEFAULT_MIN_PANEL_ICC
+    )
     #: Requirement floor, independent of the panel.
-    absolute_floor: Annotated[float, Field(gt=0.0, lt=1.0)] = DEFAULT_ABSOLUTE_FLOOR
+    absolute_floor: Annotated[float, Field(ge=MIN_CONFIGURABLE_ABSOLUTE_FLOOR, lt=1.0)] = (
+        DEFAULT_ABSOLUTE_FLOOR
+    )
     #: Cases required in the stratified cohort before the figure is reportable.
     #: A relative target computed on a handful of cases is noise.
     min_cases: Annotated[int, Field(ge=2)] = 30

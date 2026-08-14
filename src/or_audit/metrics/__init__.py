@@ -9,7 +9,11 @@ from or_audit.metrics.agreement import (
     sensitivity_at_specificity,
 )
 from or_audit.metrics.harness import (
+    DEFAULT_ABSOLUTE_FLOOR,
+    DEFAULT_MIN_PANEL_ICC,
     DEFAULT_RELATIVE_TARGET,
+    MIN_CONFIGURABLE_ABSOLUTE_FLOOR,
+    MIN_CONFIGURABLE_PANEL_ICC,
     AgreementFigure,
     AgreementGate,
     AgreementGateResult,
@@ -19,7 +23,11 @@ from or_audit.metrics.harness import (
 from or_audit.metrics.icc import IccEstimate, icc_2_1, icc_average_measures
 
 __all__ = [
+    "DEFAULT_ABSOLUTE_FLOOR",
+    "DEFAULT_MIN_PANEL_ICC",
     "DEFAULT_RELATIVE_TARGET",
+    "MIN_CONFIGURABLE_ABSOLUTE_FLOOR",
+    "MIN_CONFIGURABLE_PANEL_ICC",
     "AgreementFigure",
     "AgreementGate",
     "AgreementGateResult",

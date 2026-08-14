@@ -376,3 +376,57 @@ class TestPanelAdequacyIsAPrecondition:
         )
         assert figure.required > figure.absolute_floor
         assert figure.required == pytest.approx(0.9 * figure.expert_vs_expert.value)
+
+
+class TestProtectionsCannotBeConfiguredAway:
+    """A gate whose thresholds can be set to zero is not a gate.
+
+    Review showed the panel-adequacy check and the absolute floor could both be
+    disabled by passing near-zero values, restoring the original P0 through
+    configuration rather than through code.
+    """
+
+    @pytest.mark.parametrize("bad", [0.0, 0.001, 0.19])
+    def test_panel_adequacy_threshold_has_a_lower_bound(self, bad):
+        truth, panel = cohort(40, noise=0.3)
+        with pytest.raises(ScoreContractError, match="min_panel_icc must be at least"):
+            agreement_figure(
+                endpoint=Endpoint.BINARY_PROFICIENCY,
+                automated=truth,
+                expert_panel=panel,
+                band=SkillBand.ATTENDING,
+                min_panel_icc=bad,
+            )
+
+    @pytest.mark.parametrize("bad", [0.0, 0.001, 0.29])
+    def test_absolute_floor_has_a_lower_bound(self, bad):
+        truth, panel = cohort(40, noise=0.3)
+        with pytest.raises(ScoreContractError, match="absolute_floor must be at least"):
+            agreement_figure(
+                endpoint=Endpoint.BINARY_PROFICIENCY,
+                automated=truth,
+                expert_panel=panel,
+                band=SkillBand.ATTENDING,
+                absolute_floor=bad,
+            )
+
+    def test_the_gate_model_rejects_disabled_thresholds_too(self):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            AgreementGate(min_panel_icc=0.001)
+        with pytest.raises(ValidationError):
+            AgreementGate(absolute_floor=0.001)
+
+    def test_a_justifiably_lower_bar_is_still_permitted(self):
+        """Permissive enough for a noisier rubric, tight enough to stay a bar."""
+        truth, panel = cohort(40, noise=0.3)
+        figure = agreement_figure(
+            endpoint=Endpoint.BINARY_PROFICIENCY,
+            automated=truth,
+            expert_panel=panel,
+            band=SkillBand.ATTENDING,
+            min_panel_icc=0.20,
+            absolute_floor=0.30,
+        )
+        assert figure.required >= 0.30
