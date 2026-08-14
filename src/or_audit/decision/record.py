@@ -256,16 +256,35 @@ class DecisionRecord(BaseModel):
         return not self.disagreements
 
     def with_contestation(self, contestation: Contestation) -> DecisionRecord:
-        """Return a copy with ``contestation`` appended.
+        """Return a new record with ``contestation`` appended.
 
         Records are immutable; challenging one produces a new record rather
         than mutating the old, so the sequence of states stays inspectable.
+
+        Rebuilt through the constructor rather than ``model_copy`` so the class
+        validators actually run. ``model_copy`` skips them, which let this
+        method append a second open challenge or one filed before the decision
+        -- records the constructor rejects. A guard the write path can walk
+        around is worse than no guard, because it reads as protection.
+
+        Raises:
+            DomainInvariantError: If the result would be incoherent.
         """
-        return self.model_copy(update={"contestations": (*self.contestations, contestation)})
+        return self._rebuilt(contestations=(*self.contestations, contestation))
 
     def with_response(self, response: SubjectResponse) -> DecisionRecord:
-        """Return a copy with the subject's statement appended."""
-        return self.model_copy(update={"responses": (*self.responses, response)})
+        """Return a new record with the subject's statement appended.
+
+        Validated for the same reason as :meth:`with_contestation`.
+
+        Raises:
+            DomainInvariantError: If the response predates the decision.
+        """
+        return self._rebuilt(responses=(*self.responses, response))
+
+    def _rebuilt(self, **changes: object) -> DecisionRecord:
+        """Reconstruct through the constructor so validators run."""
+        return DecisionRecord(**{**self.model_dump(mode="python"), **changes})
 
     def subject_disclosure(self) -> dict[str, object]:
         """Everything the subject is entitled to see.

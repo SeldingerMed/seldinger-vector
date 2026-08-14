@@ -355,3 +355,62 @@ class TestProvenanceIsPinned:
     def test_naive_decision_time_is_refused(self):
         with pytest.raises(DomainInvariantError, match="timezone-aware"):
             record(decided_at=datetime(2026, 3, 5, 9, 0))
+
+
+class TestMutatorsCannotBypassTheValidators:
+    """Regression: with_contestation and with_response used model_copy.
+
+    pydantic's model_copy skips class validators, so both methods could produce
+    records the constructor rejects -- a second open challenge, a challenge
+    filed before the decision, a response predating it. A guard the write path
+    can walk around is worse than no guard, because it reads as protection.
+    """
+
+    def _filed(self, **kw: object) -> Contestation:
+        base: dict[str, object] = {
+            "state": ContestationState.FILED,
+            "filed_at": LATER,
+            "filed_by": "sur-0041",
+            "grounds": "the clipping phase was mislabelled",
+        }
+        return Contestation(**(base | kw))
+
+    def test_a_second_open_challenge_is_refused_by_the_method(self):
+        challenged = record().with_contestation(self._filed())
+        with pytest.raises(DomainInvariantError, match="only one contestation may be open"):
+            challenged.with_contestation(self._filed(grounds="another go"))
+
+    def test_a_challenge_predating_the_decision_is_refused_by_the_method(self):
+        with pytest.raises(DomainInvariantError, match="cannot be filed before"):
+            record().with_contestation(self._filed(filed_at=DECIDED - timedelta(days=1)))
+
+    def test_a_response_predating_the_decision_is_refused_by_the_method(self):
+        early = SubjectResponse(
+            submitted_at=DECIDED - timedelta(hours=1),
+            submitted_by="sur-0041",
+            statement="x",
+        )
+        with pytest.raises(DomainInvariantError, match="cannot predate"):
+            record().with_response(early)
+
+    def test_a_resolved_challenge_may_be_followed_by_a_new_one(self):
+        """Sequential challenges are legitimate; only concurrent ones are not."""
+        resolved = self._filed(
+            state=ContestationState.ORIGINAL_STANDS, resolved_at=LATER + timedelta(days=1)
+        )
+        again = self._filed(filed_at=LATER + timedelta(days=5), grounds="new evidence")
+        twice = record().with_contestation(resolved).with_contestation(again)
+        assert len(twice.contestations) == 2
+        assert twice.has_open_contestation
+
+    def test_valid_appends_still_work_and_preserve_history(self):
+        first = record()
+        second = first.with_response(
+            SubjectResponse(submitted_at=LATER, submitted_by="sur-0041", statement="a")
+        ).with_response(
+            SubjectResponse(
+                submitted_at=LATER + timedelta(days=1), submitted_by="sur-0041", statement="b"
+            )
+        )
+        assert [r.statement for r in second.responses] == ["a", "b"]
+        assert not first.responses
