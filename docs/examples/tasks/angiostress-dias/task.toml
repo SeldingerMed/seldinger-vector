@@ -1,9 +1,9 @@
 format_version = "1"
 id = "angiostress-dias"
-task_version = "0"
+task_version = "1"
 
 [metadata]
-title = "AngioStress DIAS contract (seed)"
+title = "AngioStress v0.1 full release audit"
 modality = "dsa-video"
 tags = ["angiostress", "dias", "video-predict"]
 safety_critical = true
@@ -16,15 +16,16 @@ class = "public"
 
 [environment]
 kind = "angiostress-contract"
-n_eval_episodes = 2
-seed_policy = "contract-items"
+n_eval_episodes = 1
+seed_policy = "single-release-audit"
+inputs_path = "inputs.json"
 labels_path = "labels.json"
 contract_path = "contract.json"
 
 [port]
 id = "video-predict"
 observation = "dsa-sequence"
-prediction = "mask"
+prediction = "release-audit"
 
 [agent]
 kinds = ["frozen-model"]
@@ -35,19 +36,29 @@ kind = "contract"
 
 [verifier]
 abstain_ok = false
-headline = "contract_validation_passed"
+headline = "release_audit_passed"
+entrypoint = "verifier.py:load_verifier"
 
 [[verifier.gates]]
 id = "finite_metric_check"
 
 [[verifier.metrics]]
-id = "contract_validation_passed"
+id = "release_audit_passed"
 
 [[verifier.metrics]]
-id = "dice"
+id = "dias_prediction_count"
 
 [[verifier.metrics]]
-id = "cldice"
+id = "cathaction_prediction_count"
+
+[[verifier.metrics]]
+id = "sam_vit_b_mean_dice"
+
+[[verifier.metrics]]
+id = "sam_vit_l_mean_dice"
+
+[[verifier.metrics]]
+id = "medsam_vit_b_mean_dice"
 
 [attestation]
 level = "none"

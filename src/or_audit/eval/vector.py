@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from or_audit.domain.enums import GateStatus
 from or_audit.errors import ScoreContractError, TaskContractError
 from or_audit.eval.enums import ProjectionId
-from or_audit.eval.task import ProjectionSpec, TaskSpec
+from or_audit.eval.task import ProjectionSpec
 
 
 class GateOutcome(BaseModel):
@@ -135,51 +135,3 @@ def project(vector: TrialVector, spec: ProjectionSpec) -> float:
                 msg = "gated_reach_v0 requires a boolean 'raw_success' metric"
                 raise TaskContractError(msg)
             return 1.0 if raw.value else 0.0
-
-
-def vector_from_lumen_info(
-    *,
-    task: TaskSpec,
-    agent_identity: str,
-    seed: int,
-    info: dict[str, object],
-    safety_max_pen: float,
-) -> TrialVector:
-    """Map a Lumen ``step`` info dict onto a trial vector.
-
-    Exists so P1 has one function to call and P0 can unit-test the mapping
-    without importing Newton.
-    """
-    raw_pen = info.get("max_pen", 0.0)
-    if isinstance(raw_pen, bool) or not isinstance(raw_pen, int | float):
-        msg = f"lumen info max_pen must be numeric, got {type(raw_pen).__name__}"
-        raise TaskContractError(msg)
-    max_pen = float(raw_pen)
-    diverged = bool(info.get("diverged", False))
-    unsafe = bool(info.get("unsafe", max_pen > safety_max_pen))
-    raw = bool(info.get("success", False))
-    safe = bool(info.get("safe_success", raw and not unsafe and not diverged))
-
-    if diverged:
-        wall_status = GateStatus.FAIL
-        wall_reason = "episode diverged; non-finite state is a failed trial"
-    elif unsafe:
-        wall_status = GateStatus.FAIL
-        wall_reason = f"max_pen={max_pen} exceeded safety_max_pen={safety_max_pen}"
-    else:
-        wall_status = GateStatus.PASS
-        wall_reason = f"max_pen={max_pen} within safety_max_pen={safety_max_pen}"
-
-    return TrialVector(
-        task_id=task.id,
-        task_version=task.task_version,
-        agent_identity=agent_identity,
-        seed=seed,
-        gates=(GateOutcome(id="wall_penetration", status=wall_status, reason=wall_reason),),
-        metrics=(
-            MetricOutcome(id="raw_success", value=raw),
-            MetricOutcome(id="safe_success", value=safe, headline=True),
-            MetricOutcome(id="diverged", value=diverged),
-            MetricOutcome(id="max_pen", value=max_pen),
-        ),
-    )

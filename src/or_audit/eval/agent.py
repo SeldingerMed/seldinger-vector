@@ -1,9 +1,9 @@
 """An agent is an ``org/name`` package that implements one port.
 
 Harbor: Claude Code, OpenHands, a custom ``BaseAgent``. Here: a policy
-checkpoint, a frozen video model, a VLM. The identity is HuggingFace-shaped
-so ``seldingermed/cathmodel`` and ``acme/cabg-vlm`` are the same kind of
-object. The kernel does not know what CABG is.
+checkpoint, a frozen video model, a VLM. Identities are HuggingFace-shaped, so
+``seldingermed/lumen-linear`` and ``acme/cabg-vlm`` are both agent packages.
+The kernel does not know what CABG is.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ AgentId = Annotated[
 
 
 class AgentPackage(BaseModel):
-    """Loadable agent. Weights and entrypoints are pinned later; P0 is the contract."""
+    """Loadable agent with an executable, content-pinned package."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -36,23 +36,29 @@ class AgentPackage(BaseModel):
     port: PortId
     kind: AgentKind
     weights_pin: str = ""
+    weights_path: str = ""
     entrypoint: str = ""
-    #: Relative to the agent directory. Frozen JSON predictions for P2.
-    predictions_path: str = ""
 
     @model_validator(mode="after")
-    def _random_needs_no_weights(self) -> Self:
-        if self.kind is AgentKind.RANDOM and self.weights_pin:
-            msg = (
-                f"agent {self.id} is kind=random; a weights pin would pretend "
-                f"a baseline is a checkpoint"
-            )
+    def _runtime_contract(self) -> Self:
+        if self.kind is AgentKind.RANDOM:
+            if self.weights_pin or self.weights_path or self.entrypoint:
+                msg = (
+                    f"agent {self.id} is kind=random; random baselines cannot "
+                    f"pretend to have weights or executable package code"
+                )
+                raise TaskContractError(msg)
+            return self
+        if not self.entrypoint:
+            raise TaskContractError(f"agent {self.id} must name an entrypoint")
+        if not self.weights_path or not self.weights_pin:
+            msg = f"agent {self.id} must name content-pinned weights"
             raise TaskContractError(msg)
         return self
 
     def describe(self) -> str:
         """One block for ``or-audit agents validate``."""
-        pin = self.weights_pin or "(no weights pin)"
+        pin = self.weights_pin if self.weights_pin else "(no weights)"
         return (
             f"Agent {self.id}@{self.agent_version}\n"
             f"  port       {self.port.value}\n"

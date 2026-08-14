@@ -28,7 +28,7 @@ from or_audit.eval.loader import load_agent, load_dataset, load_task
 from or_audit.eval.reconstitute import reconstitute_trial_vector
 from or_audit.eval.runner import builtin_random_agent, replay_job, run_job
 from or_audit.eval.task import PortSpec, ProjectionSpec, TaskSpec
-from or_audit.eval.vector import TrialVector, project, vector_from_lumen_info
+from or_audit.eval.vector import TrialVector, project
 
 __all__ = [
     "AgentKind",
@@ -62,5 +62,4 @@ __all__ = [
     "resolve_job",
     "run_cartesian_job",
     "run_job",
-    "vector_from_lumen_info",
 ]

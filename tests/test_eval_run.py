@@ -21,7 +21,7 @@ VIDEO_TASK = ROOT / "docs" / "examples" / "tasks" / "video-nextstep"
 ANGIO_TASK = ROOT / "docs" / "examples" / "tasks" / "angiostress-dias"
 VIDEO_AGENT = ROOT / "docs" / "examples" / "agents" / "example-video-predictor"
 CATH_SEG = ROOT / "docs" / "examples" / "agents" / "seldingermed-cath-seg"
-CATH_POLICY = ROOT / "docs" / "examples" / "agents" / "seldingermed-cathmodel"
+CATH_POLICY = ROOT / "docs" / "examples" / "agents" / "seldingermed-lumen-linear"
 
 
 class _Box:
@@ -143,10 +143,20 @@ def test_gym_replay_matches_head(tmp_path: Path) -> None:
 
 
 def test_unpinned_gym_is_not_runnable(tmp_path: Path) -> None:
+    task_dir = _pinned_lumen(tmp_path)
+    task_file = task_dir / "task.toml"
+    pin = load_task(task_dir).environment.world_pin
+    task_file.write_text(
+        task_file.read_text(encoding="utf-8").replace(
+            f'world_pin = "{pin}"',
+            'world_pin = ""',
+        ),
+        encoding="utf-8",
+    )
     with pytest.raises(TaskContractError, match="world_pin"):
         run_job(
-            task=load_task(LUMEN_TASK),
-            task_dir=LUMEN_TASK,
+            task=load_task(task_dir),
+            task_dir=task_dir,
             agent=builtin_random_agent(),
             agent_dir=None,
             out=tmp_path / "job",
@@ -155,18 +165,18 @@ def test_unpinned_gym_is_not_runnable(tmp_path: Path) -> None:
         )
 
 
-def test_policy_without_entrypoint_is_refused(tmp_path: Path) -> None:
-    task_dir = _pinned_lumen(tmp_path)
-    with pytest.raises(TaskContractError, match="entrypoint"):
-        run_job(
-            task=load_task(task_dir),
-            task_dir=task_dir,
-            agent=load_agent(CATH_POLICY),
-            agent_dir=CATH_POLICY,
-            out=tmp_path / "job",
-            n=1,
-            gym_factory=_fake,
-        )
+def test_policy_entrypoint_runs(tmp_path: Path) -> None:
+    result = run_job(
+        task=load_task(LUMEN_TASK),
+        task_dir=LUMEN_TASK,
+        agent=load_agent(CATH_POLICY),
+        agent_dir=CATH_POLICY,
+        out=tmp_path / "job",
+        n=1,
+        gym_factory=_fake,
+    )
+    assert result.n == 1
+    assert result.trials[0].trajectory[0]["action"] == [0.0, 0.0]
 
 
 def test_video_predictor_cannot_run_on_gym(tmp_path: Path) -> None:
@@ -201,6 +211,8 @@ def test_publish_omitting_safe_success_metric_is_refused() -> None:
             task=task,
             agent=builtin_random_agent(),
             trials=(TrialRecord(seed=0, vector=raw_only),),
+            task_digest="task-digest",
+            agent_digest="agent-digest",
         )
 
 
@@ -221,7 +233,21 @@ def test_video_nextstep_run(tmp_path: Path) -> None:
     assert result.claim_footer == ""
 
 
-def test_angiostress_requires_claim_footer(tmp_path: Path) -> None:
+def test_angiostress_requires_claim_footer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    class Predictor:
+        def predict(self, item: dict[str, object]) -> dict[str, object]:
+            assert "label" not in item
+            return {
+                "id": item["id"],
+                "release_audit_passed": True,
+                "dias_prediction_count": 345,
+                "cathaction_prediction_count": 5225,
+                "sam_vit_b_mean_dice": 0.8,
+                "sam_vit_l_mean_dice": 0.7,
+                "medsam_vit_b_mean_dice": 0.6,
+            }
+
+    monkeypatch.setattr("or_audit.eval.runner.load_predictor_runtime", lambda *args: Predictor())
     out = tmp_path / "angio-job"
     result = run_job(
         task=load_task(ANGIO_TASK),
@@ -230,14 +256,21 @@ def test_angiostress_requires_claim_footer(tmp_path: Path) -> None:
         agent_dir=CATH_SEG,
         out=out,
     )
-    assert result.n == 2
+    assert result.n == 1
     assert result.claim_footer
-    assert "not a final construct-validity" in result.claim_footer
+    assert "benchmark artifact" in result.claim_footer
     assert result.trials[0].vector.headline.value is True
-    assert result.trials[0].vector.metric("dice") is not None
+    assert result.trials[0].vector.metric("dias_prediction_count") is not None
 
 
-def test_angiostress_without_footer_is_refused(tmp_path: Path) -> None:
+def test_angiostress_without_footer_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Predictor:
+        def predict(self, item: dict[str, object]) -> dict[str, object]:
+            return {"id": item["id"], "release_audit_passed": True}
+
+    monkeypatch.setattr("or_audit.eval.runner.load_predictor_runtime", lambda *args: Predictor())
     task = load_task(ANGIO_TASK)
     result = run_job(
         task=task,
@@ -252,6 +285,8 @@ def test_angiostress_without_footer_is_refused(tmp_path: Path) -> None:
             task=task,
             agent=load_agent(CATH_SEG),
             trials=(TrialRecord(seed=0, vector=result.trials[0].vector),),
+            task_digest="task-digest",
+            agent_digest="agent-digest",
             claim_footer="",
         )
 

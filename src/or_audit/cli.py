@@ -27,6 +27,13 @@ from or_audit.eval.agent import AgentPackage
 from or_audit.eval.bind import assert_bind
 from or_audit.eval.enums import ProjectionId
 from or_audit.eval.loader import dataset_task_paths, load_agent, load_dataset, load_task
+from or_audit.eval.registry import (
+    DEFAULT_REGISTRY,
+    load_registry,
+    materialize_entry,
+    pull_entry,
+    resolve_entry,
+)
 from or_audit.eval.runner import builtin_random_agent, replay_job, run_job
 from or_audit.version import PACKAGE_VERSION
 
@@ -162,6 +169,30 @@ def _datasets_validate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _registry_list(args: argparse.Namespace) -> int:
+    try:
+        index = load_registry(args.registry)
+        entries = index.datasets if args.registry_kind == "dataset" else index.agents
+        for entry in sorted(entries, key=lambda item: item.reference):
+            print(f"{entry.reference}\t{entry.digest}\t{entry.repository}@{entry.ref}")
+        return 0
+    except TaskContractError as exc:
+        print(f"INVALID: {exc}", file=sys.stderr)
+        return 1
+
+
+def _registry_pull(args: argparse.Namespace) -> int:
+    try:
+        index = load_registry(args.registry)
+        entry = resolve_entry(index, kind=args.registry_kind, ref=args.reference)
+        target = pull_entry(entry, Path(args.out))
+        print(f"pulled: {entry.reference} -> {target}")
+        return 0
+    except TaskContractError as exc:
+        print(f"INVALID: {exc}", file=sys.stderr)
+        return 1
+
+
 def _agents_validate(args: argparse.Namespace) -> int:
     """Load an org/name agent package."""
     try:
@@ -186,10 +217,13 @@ def _bind(args: argparse.Namespace) -> int:
     return 0
 
 
-def _resolve_agent(spec: str) -> tuple[AgentPackage, Path | None]:
+def _resolve_agent(spec: str, *, registry_source: str) -> tuple[AgentPackage, Path | None]:
     if spec == "random":
         return builtin_random_agent(), None
     path = Path(spec)
+    if not path.exists() and "@" in spec:
+        entry = resolve_entry(load_registry(registry_source), kind="agent", ref=spec)
+        path = materialize_entry(entry)
     return load_agent(path), path if path.is_dir() else path.parent
 
 
@@ -224,7 +258,7 @@ def _run(args: argparse.Namespace) -> int:
             )
             print(f"ran: {manifest.id} pairs={len(manifest.pairs)} head {manifest.head}")
             return 0
-        agent, agent_dir = _resolve_agent(args.agent)
+        agent, agent_dir = _resolve_agent(args.agent, registry_source=args.registry)
         if args.task:
             task_path = Path(args.task)
             task_dir = task_path if task_path.is_dir() else task_path.parent
@@ -238,9 +272,17 @@ def _run(args: argparse.Namespace) -> int:
             )
             print(f"ran: {result.task_id} n={result.n} head {result.head}")
             return 0
-        load_dataset(Path(args.dataset))
+        dataset_path = Path(args.dataset)
+        if not dataset_path.exists() and "@" in args.dataset:
+            entry = resolve_entry(
+                load_registry(args.registry),
+                kind="dataset",
+                ref=args.dataset,
+            )
+            dataset_path = materialize_entry(entry)
+        load_dataset(dataset_path)
         out_root = Path(args.out)
-        for task_path in dataset_task_paths(Path(args.dataset)):
+        for task_path in dataset_task_paths(dataset_path):
             task = load_task(task_path)
             task_dir = task_path if task_path.is_dir() else task_path.parent
             result = run_job(
@@ -299,6 +341,18 @@ def _export_rl(args: argparse.Namespace) -> int:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return 1
     print(f"exported: {n} episodes -> {args.out}")
+    return 0
+
+
+def _leaderboard_build(args: argparse.Namespace) -> int:
+    from or_audit.eval.leaderboard import write_leaderboard
+
+    try:
+        data = write_leaderboard([Path(path) for path in args.paths], Path(args.out))
+    except (TaskContractError, ScoreContractError) as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 1
+    print(f"leaderboard: {len(data['rows'])} row(s) -> {args.out}")
     return 0
 
 
@@ -363,12 +417,28 @@ def build_parser() -> argparse.ArgumentParser:
     datasets_validate = datasets_sub.add_parser("validate", help="load a dataset and its tasks")
     datasets_validate.add_argument("path", help="dataset directory or dataset.toml")
     datasets_validate.set_defaults(func=_datasets_validate)
+    datasets_list = datasets_sub.add_parser("list", help="list registry datasets")
+    datasets_list.add_argument("--registry", default=DEFAULT_REGISTRY)
+    datasets_list.set_defaults(func=_registry_list, registry_kind="dataset")
+    datasets_pull = datasets_sub.add_parser("pull", help="pull a verified registry dataset")
+    datasets_pull.add_argument("reference", help="org/name@version")
+    datasets_pull.add_argument("--registry", default=DEFAULT_REGISTRY)
+    datasets_pull.add_argument("--out", required=True)
+    datasets_pull.set_defaults(func=_registry_pull, registry_kind="dataset")
 
     agents = sub.add_parser("agents", help="validate an org/name agent package")
     agents_sub = agents.add_subparsers(dest="agents_command", required=True)
     agents_validate = agents_sub.add_parser("validate", help="load and check an agent directory")
     agents_validate.add_argument("path", help="agent directory or agent.toml")
     agents_validate.set_defaults(func=_agents_validate)
+    agents_list = agents_sub.add_parser("list", help="list registry agents")
+    agents_list.add_argument("--registry", default=DEFAULT_REGISTRY)
+    agents_list.set_defaults(func=_registry_list, registry_kind="agent")
+    agents_pull = agents_sub.add_parser("pull", help="pull a verified registry agent")
+    agents_pull.add_argument("reference", help="org/name@version")
+    agents_pull.add_argument("--registry", default=DEFAULT_REGISTRY)
+    agents_pull.add_argument("--out", required=True)
+    agents_pull.set_defaults(func=_registry_pull, registry_kind="agent")
 
     bind = sub.add_parser(
         "bind",
@@ -391,7 +461,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="episodes (CLI > job.toml n > task n_eval_episodes)",
     )
     run.add_argument("--out", required=True, help="job output directory")
+    run.add_argument(
+        "--registry",
+        default=DEFAULT_REGISTRY,
+        help="registry.json path or URL for org/name@version references",
+    )
     run.set_defaults(func=_run)
+    leaderboard = sub.add_parser(
+        "leaderboard",
+        help="build a static task-scoped safety-vector leaderboard",
+    )
+    leaderboard.add_argument("paths", nargs="+", help="job directories or parents")
+    leaderboard.add_argument("--out", required=True, help="static output directory")
+    leaderboard.set_defaults(func=_leaderboard_build)
 
     replay = sub.add_parser("replay", help="re-run a job and match its stored head")
     replay.add_argument("path", help="job directory or cartesian parent")

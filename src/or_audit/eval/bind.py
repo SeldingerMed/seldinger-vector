@@ -1,6 +1,6 @@
 """Bind an ``org/name`` agent to a task, or refuse.
 
-The sandbox services ``seldingermed/cathmodel`` and ``acme/cabg-vlm`` with
+The sandbox services ``seldingermed/lumen-linear`` and ``acme/cabg-vlm`` with
 the same verb. Compatibility is port (and accepted agent kind), not
 procedure name. We do not heuristically "adapt" a video model onto a gym
 task.

@@ -1,9 +1,9 @@
 format_version = "1"
-id = "angiostress-v0"
-dataset_version = "0"
-headline = "contract_validation_passed"
+id = "seldingermed/angiostress"
+dataset_version = "1"
+headline = "release_audit_passed"
 phi_class = "public"
-description = "Seed video-predict dataset on the AngioStress contract. Headline is contract_validation_passed. A result without the claim footer is invalid."
+description = "Pinned AngioStress v0.1 full release audit with the claim boundary preserved."
 
 tasks = [
     "../../tasks/angiostress-dias",

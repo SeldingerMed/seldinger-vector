@@ -11,11 +11,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, assert_never
 
+from or_audit.audit.canonical import digest
 from or_audit.errors import TaskContractError
 from or_audit.eval.agent import AgentPackage
 from or_audit.eval.bind import assert_bind
 from or_audit.eval.enums import AgentKind, PortId, WorldKind
 from or_audit.eval.gym_world import GymFactory, make_gym, run_gym_episode, sample_action
+from or_audit.eval.integrity import tree_digest
 from or_audit.eval.job import (
     JobResult,
     TrialRecord,
@@ -24,17 +26,15 @@ from or_audit.eval.job import (
     compute_head,
     read_job_config,
     read_job_result,
+    resolve_bundle_path,
     write_job,
 )
-from or_audit.eval.predict import (
-    index_items,
-    load_claim_footer,
-    load_items,
-    vector_from_prediction,
-)
+from or_audit.eval.plugins import load_policy_runtime, load_predictor_runtime
+from or_audit.eval.predict import index_items, load_claim_footer, load_items
 from or_audit.eval.reconstitute import assert_trajectory_matches_vector
 from or_audit.eval.task import TaskSpec
-from or_audit.eval.vector import project, vector_from_lumen_info
+from or_audit.eval.vector import project
+from or_audit.eval.verifier import score_context
 
 SAFETY_MAX_PEN = 0.3
 
@@ -63,6 +63,10 @@ def run_job(
     """Bind, run, write a job directory, return the :class:`JobResult`."""
     assert_bind(task, agent)
     task.assert_runnable()
+    task_package_digest = tree_digest(task_dir)
+    agent_package_digest = (
+        tree_digest(agent_dir) if agent_dir is not None else digest(agent.model_dump(mode="json"))
+    )
     episodes = n if n is not None else task.environment.n_eval_episodes
     if episodes < 1:
         msg = f"n must be >= 1, got {episodes}"
@@ -71,7 +75,11 @@ def run_job(
     if task.port.id is PortId.GYM_POLICY:
         result, safety = _run_gym(
             task=task,
+            task_dir=task_dir,
             agent=agent,
+            agent_dir=agent_dir,
+            task_digest=task_package_digest,
+            agent_digest=agent_package_digest,
             n=episodes,
             gym_factory=gym_factory,
         )
@@ -82,62 +90,83 @@ def run_job(
             task_dir=task_dir,
             agent=agent,
             agent_dir=agent_dir,
+            task_digest=task_package_digest,
+            agent_digest=agent_package_digest,
             n=episodes,
         )
     else:
         assert_never(task.port.id)
     config = {
         "task_id": task.id,
-        "task_dir": str(task_dir.resolve()),
+        "task_dir": "bundle/task",
         "agent_id": agent.id,
-        "agent_dir": str(agent_dir.resolve()) if agent_dir is not None else None,
+        "agent_dir": "bundle/agent" if agent_dir is not None else None,
+        "task_digest": task_package_digest,
+        "agent_digest": agent_package_digest,
         "n": result.n,
         "world_pin": task.environment.world_pin,
         "port": task.port.id.value,
         **extra,
     }
-    write_job(out, config=config, result=result)
+    write_job(
+        out,
+        config=config,
+        result=result,
+        task_dir=task_dir,
+        agent_dir=agent_dir,
+    )
     return result
 
 
 def _run_gym(
     *,
     task: TaskSpec,
+    task_dir: Path,
     agent: AgentPackage,
+    agent_dir: Path | None,
     n: int,
+    task_digest: str,
+    agent_digest: str,
     gym_factory: GymFactory | None,
 ) -> tuple[JobResult, float]:
-    if agent.kind is AgentKind.POLICY and not agent.entrypoint:
-        msg = (
-            f"agent {agent.id} is kind=policy with no entrypoint; P1 runs "
-            f"kind=random (and a policy entrypoint later)"
-        )
-        raise TaskContractError(msg)
     if agent.kind not in {AgentKind.RANDOM, AgentKind.POLICY}:
         msg = f"gym-policy runner does not implement kind={agent.kind.value}"
         raise TaskContractError(msg)
+    policy = None
+    if agent.kind is AgentKind.POLICY:
+        if agent_dir is None:
+            raise TaskContractError(f"policy agent {agent.id} has no package directory")
+        policy = load_policy_runtime(agent_dir, agent.entrypoint, agent.weights_path)
 
     factory: GymFactory = gym_factory or make_gym
     env = factory(task)
     identity = agent_identity(agent)
-    safety = float(getattr(env, "safety_max_pen", SAFETY_MAX_PEN))
+    unwrapped = getattr(env, "unwrapped", env)
+    nested = getattr(unwrapped, "_env", unwrapped)
+    safety = float(getattr(nested, "safety_max_pen", SAFETY_MAX_PEN))
 
     trials: list[TrialRecord] = []
     for seed in range(n):
+        if policy is not None:
+            policy.reset(seed=seed)
 
-        def action_fn(world: Any, step: int, *, episode_seed: int = seed) -> Any:
-            if agent.kind is AgentKind.RANDOM:
+        def action_fn(world: Any, observation: Any, step: int, *, episode_seed: int = seed) -> Any:
+            if policy is None:
                 return sample_action(world, seed=episode_seed, step=step)
-            msg = f"policy entrypoint {agent.entrypoint!r} is not loaded in P1"
-            raise TaskContractError(msg)
+            return policy.act(observation, step=step)
 
         info, trajectory = run_gym_episode(env, seed=seed, action_fn=action_fn)
-        vector = vector_from_lumen_info(
+        vector = score_context(
             task=task,
+            task_dir=task_dir,
             agent_identity=identity,
             seed=seed,
-            info=info,
-            safety_max_pen=safety,
+            context={
+                "kind": "gym-policy",
+                "info": info,
+                "trajectory": trajectory,
+                "safety_max_pen": safety,
+            },
         )
         projection = project(vector, task.projection) if task.projection is not None else None
         trials.append(
@@ -148,7 +177,16 @@ def _run_gym(
                 projection=projection,
             )
         )
-    return assemble_job_result(task=task, agent=agent, trials=tuple(trials)), safety
+    return (
+        assemble_job_result(
+            task=task,
+            agent=agent,
+            trials=tuple(trials),
+            task_digest=task_digest,
+            agent_digest=agent_digest,
+        ),
+        safety,
+    )
 
 
 def _run_predict(
@@ -158,42 +196,56 @@ def _run_predict(
     agent: AgentPackage,
     agent_dir: Path | None,
     n: int,
+    task_digest: str,
+    agent_digest: str,
 ) -> JobResult:
-    labels_path = task_dir / task.environment.labels_path
-    labels = load_items(labels_path)
-    if agent_dir is None or not agent.predictions_path:
-        msg = (
-            f"agent {agent.id} has no predictions_path; video-predict P2 scores "
-            f"submitted JSON against labels (a live VLM entrypoint is P6)"
-        )
-        raise TaskContractError(msg)
-    predictions = index_items(load_items(agent_dir / agent.predictions_path))
+    inputs = load_items(task_dir / task.environment.inputs_path)
+    labels = index_items(load_items(task_dir / task.environment.labels_path))
+    if agent_dir is None:
+        raise TaskContractError(f"agent {agent.id} has no package directory")
+    predictor = load_predictor_runtime(agent_dir, agent.entrypoint, agent.weights_path)
     identity = agent_identity(agent)
-    items = labels[:n]
+    items = inputs[:n]
     trials: list[TrialRecord] = []
-    for seed, label in enumerate(items):
-        item_id = str(label["id"])
-        if item_id not in predictions:
-            msg = f"agent {agent.id} has no prediction for item {item_id!r}"
-            raise TaskContractError(msg)
-        vector = vector_from_prediction(
+    for seed, item in enumerate(items):
+        item_id = str(item["id"])
+        if item_id not in labels:
+            raise TaskContractError(f"task {task.id} has no label for item {item_id!r}")
+        prediction = predictor.predict(item)
+        if not isinstance(prediction, dict):
+            raise TaskContractError(f"agent {agent.id} prediction for {item_id!r} is not an object")
+        label = labels[item_id]
+        context = {
+            "kind": "video-predict",
+            "input": item,
+            "label": label,
+            "prediction": prediction,
+        }
+        vector = score_context(
             task=task,
+            task_dir=task_dir,
             agent_identity=identity,
             seed=seed,
-            label=label,
-            prediction=predictions[item_id],
+            context=context,
         )
         trials.append(
             TrialRecord(
                 seed=seed,
                 vector=vector,
-                trajectory=({"id": item_id, "label": label, "prediction": predictions[item_id]},),
+                trajectory=(context,),
             )
         )
     footer = ""
     if task.environment.kind is WorldKind.ANGIOSTRESS_CONTRACT:
         footer = load_claim_footer(task_dir / task.environment.contract_path)
-    return assemble_job_result(task=task, agent=agent, trials=tuple(trials), claim_footer=footer)
+    return assemble_job_result(
+        task=task,
+        agent=agent,
+        trials=tuple(trials),
+        task_digest=task_digest,
+        agent_digest=agent_digest,
+        claim_footer=footer,
+    )
 
 
 def replay_job(
@@ -206,16 +258,28 @@ def replay_job(
     """Re-run a job from its config and check the head."""
     config = read_job_config(out)
     previous = read_job_result(out)
-    task_dir = Path(str(config["task_dir"]))
+    task_dir = resolve_bundle_path(out, config["task_dir"], label="task")
+    if tree_digest(task_dir) != config.get("task_digest"):
+        raise TaskContractError("bundled task digest does not match config")
     task = load_task(task_dir)
     agent_dir_raw = config.get("agent_dir")
     if agent_dir_raw:
-        agent_dir = Path(str(agent_dir_raw))
+        agent_dir = resolve_bundle_path(out, agent_dir_raw, label="agent")
+        if tree_digest(agent_dir) != config.get("agent_digest"):
+            raise TaskContractError("bundled agent digest does not match config")
         agent = load_agent(agent_dir)
     else:
         agent_dir = None
         agent = builtin_random_agent()
-    assert_trajectory_matches_vector(out, task=task, result=previous, config=config)
+        if digest(agent.model_dump(mode="json")) != config.get("agent_digest"):
+            raise TaskContractError("builtin agent digest does not match config")
+    assert_trajectory_matches_vector(
+        out,
+        task=task,
+        task_dir=task_dir,
+        result=previous,
+        config=config,
+    )
     rerun = run_job(
         task=task,
         task_dir=task_dir,

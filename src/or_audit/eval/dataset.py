@@ -18,6 +18,14 @@ from or_audit.eval.task import TaskSpec
 Slug = Annotated[
     str, StringConstraints(min_length=1, max_length=80, pattern=r"^[a-z0-9][a-z0-9_-]*$")
 ]
+DatasetId = Annotated[
+    str,
+    StringConstraints(
+        min_length=3,
+        max_length=80,
+        pattern=r"^[a-z0-9][a-z0-9_-]*/[a-z0-9][a-z0-9_-]*$",
+    ),
+]
 
 
 class DatasetSpec(BaseModel):
@@ -26,7 +34,7 @@ class DatasetSpec(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     format_version: Annotated[str, StringConstraints(min_length=1, max_length=16)]
-    id: Slug
+    id: DatasetId
     dataset_version: Annotated[str, StringConstraints(min_length=1, max_length=32)]
     headline: Slug
     phi_class: PhiClass

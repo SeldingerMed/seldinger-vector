@@ -1,0 +1,7 @@
+{
+  "items": [
+    {"id": "clip-001", "media": "public://video-nextstep/clip-001"},
+    {"id": "clip-002", "media": "public://video-nextstep/clip-002"},
+    {"id": "clip-003", "media": "public://video-nextstep/clip-003"}
+  ]
+}

@@ -17,7 +17,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from or_audit.errors import ScoreContractError, TaskContractError
 from or_audit.eval.cartesian import iter_job_dirs
 from or_audit.eval.enums import ProjectionId
-from or_audit.eval.job import read_job_config, read_job_result
+from or_audit.eval.integrity import tree_digest
+from or_audit.eval.job import read_job_config, read_job_result, resolve_bundle_path
 from or_audit.eval.loader import load_task
 from or_audit.eval.task import ProjectionSpec, TaskSpec
 from or_audit.eval.vector import project
@@ -49,7 +50,10 @@ def export_job_records(job_dir: Path, *, projection_id: ProjectionId) -> tuple[R
     """Recompute one job's trials into RL records."""
     config = read_job_config(job_dir)
     result = read_job_result(job_dir)
-    task = load_task(Path(str(config["task_dir"])))
+    task_dir = resolve_bundle_path(job_dir, config["task_dir"], label="task")
+    if tree_digest(task_dir) != config.get("task_digest"):
+        raise TaskContractError(f"{job_dir.name} bundled task digest does not match config")
+    task = load_task(task_dir)
     spec = _spec_for_task(task, projection_id)
     records: list[RlExportRecord] = []
     for trial in result.trials:
