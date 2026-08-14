@@ -269,7 +269,7 @@ def test_reconstitute_refuses_unknown_trajectory(tmp_path: Path) -> None:
     trial = tmp_path / "trial-x-0"
     trial.mkdir()
     (trial / "trajectory.json").write_text('[{"foo": 1}]\n', encoding="utf-8")
-    with pytest.raises(TaskContractError, match="neither gym-policy nor video-predict"):
+    with pytest.raises(TaskContractError, match="neither gym-policy"):
         reconstitute_trial_vector(
             trial,
             task=load_task(VIDEO_TASK),
@@ -345,6 +345,35 @@ def test_cli_run_job_and_task_together(tmp_path: Path) -> None:
 
 def test_cli_run_task_requires_agent(tmp_path: Path) -> None:
     assert main(["run", "-t", str(VIDEO_TASK), "--out", str(tmp_path / "x")]) == 2
+
+
+def test_job_refuses_duplicate_agents(tmp_path: Path) -> None:
+    dest = tmp_path / "dup-agents"
+    dest.mkdir()
+    (dest / "job.toml").write_text(
+        'format_version = "1"\nid = "dup-agents"\ntasks = ["a"]\nagents = ["random", "random"]\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(TaskContractError, match="same agent twice"):
+        load_job_config(dest)
+
+
+def test_cli_export_rl_refuses_video_gated_reach(tmp_path: Path) -> None:
+    out = tmp_path / "video-job"
+    assert main(["run", "-t", str(VIDEO_TASK), "-a", str(VIDEO_AGENT), "--out", str(out)]) == 0
+    assert (
+        main(
+            [
+                "export-rl",
+                str(out),
+                "--projection",
+                "gated_reach_v0",
+                "--out",
+                str(tmp_path / "nope.jsonl"),
+            ]
+        )
+        == 1
+    )
 
 
 def test_cli_export_rl_refuses_homemade_projection(tmp_path: Path) -> None:
