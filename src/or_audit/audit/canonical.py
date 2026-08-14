@@ -176,7 +176,14 @@ def _render(value: Any) -> str:
         #
         # Microseconds are preserved, never truncated: this is an audit record.
         moment = value.astimezone(UTC)
-        return _escape(f"{moment.strftime('%Y-%m-%dT%H:%M:%S')}.{moment.microsecond:06d}Z")
+        # Explicit field widths rather than strftime: %Y zero-padding for
+        # years below 1000 is platform-dependent in CPython, and "any
+        # implementation can regenerate these bytes" is the entire point.
+        return _escape(
+            f"{moment.year:04d}-{moment.month:02d}-{moment.day:02d}"
+            f"T{moment.hour:02d}:{moment.minute:02d}:{moment.second:02d}"
+            f".{moment.microsecond:06d}Z"
+        )
     if isinstance(value, Mapping):
         items = []
         for key in sorted(value, key=_utf16_sort_key):

@@ -6,6 +6,8 @@ these tests mutate a valid chain and assert that verification catches it.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from pydantic import ValidationError
 
@@ -195,6 +197,43 @@ class TestTamperDetection:
     def test_deleting_a_middle_entry_is_detected(self, trail):
         with pytest.raises(AuditChainError, match="declares seq"):
             verify_entries(list(trail.entries)[1:])
+
+    @pytest.mark.parametrize(
+        ("corruption", "label"),
+        [("{not json", "unparseable line"), ('{"seq":0}', "missing fields")],
+    )
+    def test_malformed_lines_raise_chain_error(self, trail, tmp_path, corruption, label):
+        """One exception type for every way a log can be unusable.
+
+        A caller auditing a log should not have to catch JSONDecodeError,
+        ValidationError and AuditChainError to cover the same question.
+        """
+        path = tmp_path / "audit.jsonl"
+        trail.to_jsonl(path)
+        path.write_text(f"{corruption}\n", encoding="utf-8")
+        with pytest.raises(AuditChainError, match="not a valid entry"):
+            AuditTrail.from_jsonl(path)
+
+    def test_malformed_line_error_names_the_line_number(self, trail, tmp_path):
+        path = tmp_path / "audit.jsonl"
+        trail.to_jsonl(path)
+        lines = path.read_text(encoding="utf-8").splitlines()
+        path.write_text("\n".join([lines[0], "{not json"]) + "\n", encoding="utf-8")
+        with pytest.raises(AuditChainError, match="line 2"):
+            AuditTrail.from_jsonl(path)
+
+    def test_sub_millisecond_timestamps_survive_a_round_trip(self, tmp_path, actor):
+        """Microseconds are preserved, not quantized: this is a forensic record."""
+        moments = iter([datetime(2026, 1, 1, 12, 0, 0, us, tzinfo=UTC) for us in (0, 1, 2, 999999)])
+        built = AuditTrail(clock=lambda: next(moments))
+        for _ in range(4):
+            built.append(actor=actor, action=AuditAction.SCORE_COMPUTED, subject_ref=SUBJECT)
+        path = tmp_path / "audit.jsonl"
+        built.to_jsonl(path)
+        loaded = AuditTrail.from_jsonl(path)
+        loaded.verify(expected_head=built.head_hash, expected_length=4)
+        assert [e.recorded_at.microsecond for e in loaded] == [0, 1, 2, 999999]
+        assert len({e.entry_hash for e in loaded}) == 4
 
     def test_reordering_entries_is_detected(self, trail):
         with pytest.raises(AuditChainError, match="declares seq"):

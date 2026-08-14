@@ -33,7 +33,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Final, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from or_audit.audit.canonical import canonical_json, digest, digest_text
 from or_audit.errors import AuditChainError
@@ -337,13 +337,21 @@ class AuditTrail:
             The loaded trail.
 
         Raises:
-            AuditChainError: If ``verify`` and the chain is inconsistent.
+            AuditChainError: If the file is unparseable, an entry is malformed,
+                or ``verify`` and the chain is inconsistent. All three are
+                surfaced as one type so a caller auditing a log has a single
+                exception to catch rather than three unrelated ones.
         """
         trail = cls()
         with path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                if line.strip():
+            for number, line in enumerate(handle, start=1):
+                if not line.strip():
+                    continue
+                try:
                     trail._entries.append(AuditEntry.model_validate(json.loads(line)))
+                except (json.JSONDecodeError, ValidationError) as exc:
+                    msg = f"audit log {path} line {number} is not a valid entry: {exc}"
+                    raise AuditChainError(msg) from exc
         if verify:
             trail.verify()
         return trail
