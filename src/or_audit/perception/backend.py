@@ -30,6 +30,7 @@ from or_audit.errors import DomainInvariantError
 from or_audit.perception.observations import (
     BleedingEvent,
     CvsObservation,
+    ObservationKind,
     PerceptionResult,
     PhaseSegment,
     ProximityEvent,
@@ -108,14 +109,32 @@ class AnnotationBackend:
         proximity_events: tuple[ProximityEvent, ...] = (),
         bleeding_events: tuple[BleedingEvent, ...] = (),
         cvs: tuple[CvsObservation, ...] = (),
+        observes: frozenset[ObservationKind] | set[ObservationKind] | None = None,
         version: str = ANNOTATION_BACKEND_VERSION,
     ) -> None:
-        """Hold one episode's annotations."""
+        """Hold one episode's annotations.
+
+        Args:
+            observes: Which observation kinds the annotator actually assessed.
+                Required, and deliberately not inferred from which lists are
+                non-empty: "looked for bleeding and found none" and "never
+                looked at bleeding" are different claims, and only the first
+                may clear a gate. Inferring coverage would silently turn the
+                second into the first.
+        """
+        if observes is None:
+            msg = (
+                "an annotation backend must declare which observation kinds it "
+                "assessed; absence of an observation only means 'none found' for "
+                "declared kinds (PLAN.md section 7.1)"
+            )
+            raise DomainInvariantError(msg)
         self._phases = phases
         self._structures = structures
         self._proximity = proximity_events
         self._bleeding = bleeding_events
         self._cvs = cvs
+        self._observes = frozenset(observes)
         self._version = version
 
     @property
@@ -134,11 +153,16 @@ class AnnotationBackend:
         video = readable_video(episode)
         duration_s = episode_duration_s(video)
         self._check_within(duration_s)
+        attestations = tuple(
+            a.deid_attestation_sha256 for a in video if a.deid_attestation_sha256 is not None
+        )
         return PerceptionResult(
             backend=ANNOTATION_BACKEND,
             backend_version=self._version,
             media_sha256=tuple(a.sha256 for a in video),
+            deid_attestation_sha256=attestations,
             duration_s=duration_s,
+            observes=self._observes,
             phases=self._phases,
             structures=self._structures,
             proximity_events=self._proximity,

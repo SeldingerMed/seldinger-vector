@@ -12,6 +12,7 @@ from or_audit.scoring.gates import (
     evaluate_bleeding,
     evaluate_cvs,
     evaluate_proximity,
+    verify_binding,
 )
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "evaluate_bleeding",
     "evaluate_cvs",
     "evaluate_proximity",
+    "verify_binding",
 ]

@@ -67,6 +67,26 @@ class CvsCriterion(StrEnum):
     TWO_STRUCTURES_ONLY = "two_structures_entering_gallbladder"
 
 
+class ObservationKind(StrEnum):
+    """What a backend actually looked for.
+
+    Without this, "measured and found nothing" is indistinguishable from
+    "never looked", and every gate clears on an empty result. A backend that
+    does not implement proximity detection would otherwise pass the proximity
+    gate by returning nothing -- which is precisely the abstention failure
+    PLAN.md section 7.1 exists to prevent.
+
+    Declaring coverage is therefore mandatory, and reporting an observation of
+    a kind you did not declare is a contradiction the model rejects.
+    """
+
+    PHASES = "phases"
+    STRUCTURES = "structures"
+    PROXIMITY = "proximity"
+    BLEEDING = "bleeding"
+    CVS = "cvs"
+
+
 class BleedingSeverity(StrEnum):
     """Coarse bleeding severity. Ordinal, and compared as such."""
 
@@ -199,7 +219,14 @@ class PerceptionResult(_Obs):
     backend_version: str
     #: Digests of the attested media this result was computed from.
     media_sha256: tuple[Sha256Hex, ...]
+    #: Digests of the de-identification attestations that cleared that media.
+    #: Carried so a consumer of this result can confirm section 8 was honoured
+    #: without re-deriving it from an Episode it may not hold.
+    deid_attestation_sha256: tuple[Sha256Hex, ...]
     duration_s: Annotated[float, Field(gt=0.0)]
+    #: The observation kinds this backend assessed. Absence of an observation
+    #: only means "none found" for kinds listed here.
+    observes: frozenset[ObservationKind]
 
     phases: tuple[PhaseSegment, ...] = ()
     structures: tuple[StructureSighting, ...] = ()
@@ -212,26 +239,70 @@ class PerceptionResult(_Obs):
         if not self.media_sha256:
             msg = f"perception result from {self.backend} names no source media"
             raise DomainInvariantError(msg)
+        if not self.deid_attestation_sha256:
+            msg = (
+                f"perception result from {self.backend} names no de-identification "
+                f"attestation; only cleared media may be perceived (PLAN.md section 8)"
+            )
+            raise DomainInvariantError(msg)
         seen = {obs.criterion for obs in self.cvs}
         if len(seen) != len(self.cvs):
             msg = f"perception result from {self.backend} reports a CVS criterion twice"
             raise DomainInvariantError(msg)
         return self
 
+    @model_validator(mode="after")
+    def _observations_match_declared_coverage(self) -> Self:
+        """Reporting an observation of an undeclared kind is a contradiction."""
+        reported = {
+            ObservationKind.PHASES: bool(self.phases),
+            ObservationKind.STRUCTURES: bool(self.structures),
+            ObservationKind.PROXIMITY: bool(self.proximity_events),
+            ObservationKind.BLEEDING: bool(self.bleeding_events),
+            ObservationKind.CVS: bool(self.cvs),
+        }
+        undeclared = sorted(
+            k.value for k, present in reported.items() if present and k not in self.observes
+        )
+        if undeclared:
+            msg = (
+                f"perception result from {self.backend} reports {', '.join(undeclared)} "
+                f"observations without declaring coverage of them"
+            )
+            raise DomainInvariantError(msg)
+        return self
+
+    def assessed(self, kind: ObservationKind) -> bool:
+        """Whether the backend looked for ``kind`` at all."""
+        return kind in self.observes
+
     @property
     def identity(self) -> str:
         """Backend and version, as recorded on any artifact derived from this."""
         return f"{self.backend}@{self.backend_version}"
 
-    def phase_span(self, phase: SurgicalPhase) -> tuple[float, float] | None:
+    def phase_span(
+        self, phase: SurgicalPhase, *, min_confidence: float = 0.0
+    ) -> tuple[float, float] | None:
         """Earliest start and latest end observed for ``phase``.
 
+        Args:
+            phase: Phase to locate.
+            min_confidence: Ignore segments below this confidence. A gate that
+                anchors a timing verdict on a phase should floor it the same
+                way it floors every other input, otherwise a phantom detection
+                manufactures a conclusion.
+
         Returns:
-            The span, or ``None`` if the phase was never observed. Absence is
-            meaningful: a gate that depends on a phase it cannot locate must
-            report itself unassessable rather than guess.
+            The span, or ``None`` if the phase was never confidently observed.
+            Absence is meaningful: a gate that cannot locate a phase it depends
+            on must report itself unassessable rather than guess.
         """
-        spans = [(p.start_s, p.end_s) for p in self.phases if p.phase is phase]
+        spans = [
+            (p.start_s, p.end_s)
+            for p in self.phases
+            if p.phase is phase and p.confidence >= min_confidence
+        ]
         if not spans:
             return None
         return min(s for s, _ in spans), max(e for _, e in spans)

@@ -24,6 +24,7 @@ from or_audit.perception.observations import (
     CriticalStructure,
     CvsCriterion,
     CvsObservation,
+    ObservationKind,
     PerceptionResult,
     PhaseSegment,
     ProximityEvent,
@@ -66,33 +67,69 @@ class TestDeidentificationGateHolds:
     @pytest.mark.parametrize("status", [DeidStatus.RAW, DeidStatus.IN_PROGRESS, DeidStatus.FAILED])
     def test_uncleared_media_cannot_be_perceived(self, status):
         with pytest.raises(DeidentificationBoundaryError):
-            AnnotationBackend().analyse(build_episode(deid=status))
+            AnnotationBackend(observes=frozenset(ObservationKind)).analyse(
+                build_episode(deid=status)
+            )
 
     def test_cleared_media_can_be_perceived(self):
-        assert AnnotationBackend().analyse(build_episode()).duration_s == 1800.0
+        assert (
+            AnnotationBackend(observes=frozenset(ObservationKind))
+            .analyse(build_episode())
+            .duration_s
+            == 1800.0
+        )
 
 
 class TestResultBinding:
     def test_result_is_bound_to_the_media_digests(self):
         """Otherwise a result could be paired with a different recording."""
         episode = build_episode()
-        out = AnnotationBackend().analyse(episode)
+        out = AnnotationBackend(observes=frozenset(ObservationKind)).analyse(episode)
         assert out.media_sha256 == (episode.media[0].sha256,)
 
     def test_result_carries_backend_identity(self):
-        assert AnnotationBackend().analyse(build_episode()).identity == "expert-annotation@1"
+        assert (
+            AnnotationBackend(observes=frozenset(ObservationKind)).analyse(build_episode()).identity
+            == "expert-annotation@1"
+        )
 
     def test_backend_satisfies_the_protocol(self):
-        assert isinstance(AnnotationBackend(), PerceptionBackend)
+        assert isinstance(AnnotationBackend(observes=frozenset(ObservationKind)), PerceptionBackend)
 
     def test_missing_duration_is_refused(self):
         """Timing-dependent gates cannot run against an unknown timeline."""
         with pytest.raises(DomainInvariantError, match="no duration"):
-            AnnotationBackend().analyse(build_episode(duration=None))
+            AnnotationBackend(observes=frozenset(ObservationKind)).analyse(
+                build_episode(duration=None)
+            )
 
     def test_result_without_media_digests_is_rejected(self):
         with pytest.raises(DomainInvariantError, match="names no source media"):
-            PerceptionResult(backend="x", backend_version="1", media_sha256=(), duration_s=10.0)
+            PerceptionResult(
+                backend="x",
+                backend_version="1",
+                media_sha256=(),
+                deid_attestation_sha256=("d" * 64,),
+                observes=frozenset(),
+                duration_s=10.0,
+            )
+
+    def test_result_without_a_deid_attestation_is_rejected(self):
+        """Only cleared media may be perceived, and the result must say so."""
+        with pytest.raises(DomainInvariantError, match="names no de-identification"):
+            PerceptionResult(
+                backend="x",
+                backend_version="1",
+                media_sha256=("a" * 64,),
+                deid_attestation_sha256=(),
+                observes=frozenset(),
+                duration_s=10.0,
+            )
+
+    def test_result_carries_the_attestation_digests(self):
+        episode = build_episode()
+        out = AnnotationBackend(observes=frozenset(ObservationKind)).analyse(episode)
+        assert out.deid_attestation_sha256 == (episode.media[0].deid_attestation_sha256,)
 
 
 class TestAnnotationsMustMatchTheMedia:
@@ -101,6 +138,7 @@ class TestAnnotationsMustMatchTheMedia:
 
     def test_phase_past_the_end_is_refused(self):
         backend = AnnotationBackend(
+            observes=frozenset(ObservationKind),
             phases=(
                 PhaseSegment(
                     phase=SurgicalPhase.PREPARATION,
@@ -108,13 +146,14 @@ class TestAnnotationsMustMatchTheMedia:
                     end_s=9999.0,
                     confidence=0.9,
                 ),
-            )
+            ),
         )
         with pytest.raises(DomainInvariantError, match="do not match this media"):
             backend.analyse(build_episode())
 
     def test_bleeding_past_the_end_is_refused(self):
         backend = AnnotationBackend(
+            observes=frozenset(ObservationKind),
             bleeding_events=(
                 BleedingEvent(
                     severity=BleedingSeverity.MINOR,
@@ -122,13 +161,14 @@ class TestAnnotationsMustMatchTheMedia:
                     end_s=9999.0,
                     confidence=0.9,
                 ),
-            )
+            ),
         )
         with pytest.raises(DomainInvariantError, match="bleeding event ends at"):
             backend.analyse(build_episode())
 
     def test_proximity_past_the_end_is_refused(self):
         backend = AnnotationBackend(
+            observes=frozenset(ObservationKind),
             proximity_events=(
                 ProximityEvent(
                     structure=CriticalStructure.COMMON_BILE_DUCT,
@@ -136,13 +176,14 @@ class TestAnnotationsMustMatchTheMedia:
                     distance_mm=1.0,
                     confidence=0.9,
                 ),
-            )
+            ),
         )
         with pytest.raises(DomainInvariantError, match="proximity event at"):
             backend.analyse(build_episode())
 
     def test_structure_past_the_end_is_refused(self):
         backend = AnnotationBackend(
+            observes=frozenset(ObservationKind),
             structures=(
                 StructureSighting(
                     structure=CriticalStructure.CYSTIC_DUCT,
@@ -150,13 +191,14 @@ class TestAnnotationsMustMatchTheMedia:
                     end_s=9999.0,
                     confidence=0.9,
                 ),
-            )
+            ),
         )
         with pytest.raises(DomainInvariantError, match="sighting of"):
             backend.analyse(build_episode())
 
     def test_cvs_timestamp_past_the_end_is_refused(self):
         backend = AnnotationBackend(
+            observes=frozenset(ObservationKind),
             cvs=(
                 CvsObservation(
                     criterion=CvsCriterion.TRIANGLE_CLEARED,
@@ -164,13 +206,14 @@ class TestAnnotationsMustMatchTheMedia:
                     at_s=9999.0,
                     confidence=0.9,
                 ),
-            )
+            ),
         )
         with pytest.raises(DomainInvariantError, match="recorded at"):
             backend.analyse(build_episode())
 
     def test_annotations_inside_the_recording_are_accepted(self):
         backend = AnnotationBackend(
+            observes=frozenset(ObservationKind),
             phases=(
                 PhaseSegment(
                     phase=SurgicalPhase.PREPARATION,
@@ -178,7 +221,7 @@ class TestAnnotationsMustMatchTheMedia:
                     end_s=1800.0,
                     confidence=0.9,
                 ),
-            )
+            ),
         )
         assert len(backend.analyse(build_episode()).phases) == 1
 
@@ -224,6 +267,8 @@ class TestObservationValidity:
                 backend="x",
                 backend_version="1",
                 media_sha256=("a" * 64,),
+                deid_attestation_sha256=("d" * 64,),
+                observes=frozenset(ObservationKind),
                 duration_s=100.0,
                 cvs=(
                     CvsObservation(
@@ -252,6 +297,8 @@ class TestResultQueries:
             "backend": "x",
             "backend_version": "1",
             "media_sha256": ("a" * 64,),
+            "deid_attestation_sha256": ("d" * 64,),
+            "observes": frozenset(ObservationKind),
             "duration_s": 100.0,
         }
         return PerceptionResult(**(base | kw))

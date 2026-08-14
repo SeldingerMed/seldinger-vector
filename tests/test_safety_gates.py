@@ -8,11 +8,20 @@ pass when it simply could not see.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
-from or_audit.domain.entities import Procedure
-from or_audit.domain.enums import GateStatus
-from or_audit.domain.ids import new_procedure_id
+from or_audit.domain.entities import Episode, MediaAsset, Procedure
+from or_audit.domain.enums import DeidStatus, GateStatus, MediaKind, SkillBand
+from or_audit.domain.ids import (
+    new_episode_id,
+    new_institution_id,
+    new_media_asset_id,
+    new_procedure_id,
+    new_surgeon_id,
+    new_system_id,
+)
 from or_audit.errors import ScoreContractError
 from or_audit.perception.observations import (
     BleedingEvent,
@@ -20,6 +29,7 @@ from or_audit.perception.observations import (
     CriticalStructure,
     CvsCriterion,
     CvsObservation,
+    ObservationKind,
     PerceptionResult,
     PhaseSegment,
     ProximityEvent,
@@ -35,6 +45,38 @@ from or_audit.scoring.gates import (
 )
 
 POLICY = GatePolicy()
+
+MEDIA_SHA = "a" * 64
+ATTESTATION_SHA = "d" * 64
+ALL_KINDS = frozenset(ObservationKind)
+
+
+@pytest.fixture
+def episode() -> Episode:
+    """An episode whose cleared media matches the digests the fixtures use."""
+    episode_id = new_episode_id()
+    return Episode(
+        id=episode_id,
+        institution_id=new_institution_id(),
+        procedure_id=new_procedure_id(),
+        surgeon_id=new_surgeon_id(),
+        system_id=new_system_id(),
+        band_at_episode=SkillBand.ATTENDING,
+        performed_at=datetime(2026, 3, 4, 14, 30, tzinfo=UTC),
+        media=(
+            MediaAsset(
+                id=new_media_asset_id(),
+                episode_id=episode_id,
+                kind=MediaKind.ENDOSCOPIC_VIDEO,
+                raw_uri="file:///deid/case.npz",
+                sha256=MEDIA_SHA,
+                duration_seconds=1800.0,
+                frame_rate=30.0,
+                deid_status=DeidStatus.ATTESTED,
+                deid_attestation_sha256=ATTESTATION_SHA,
+            ),
+        ),
+    )
 
 
 @pytest.fixture
@@ -62,7 +104,9 @@ def result(**overrides: object) -> PerceptionResult:
     base: dict[str, object] = {
         "backend": "expert-annotation",
         "backend_version": "1",
-        "media_sha256": ("a" * 64,),
+        "media_sha256": (MEDIA_SHA,),
+        "deid_attestation_sha256": (ATTESTATION_SHA,),
+        "observes": ALL_KINDS,
         "duration_s": 1800.0,
         "phases": (
             PhaseSegment(
@@ -141,7 +185,7 @@ class TestCvsGate:
         )
         gate = evaluate_cvs(result(cvs=cvs), chole, POLICY)
         assert gate.status is GateStatus.FAIL
-        assert "after clipping" in gate.reason
+        assert "strictly before" in gate.reason
 
     def test_last_criterion_is_the_one_that_counts(self, chole):
         """Completion time is the max, not the min: all three must precede."""
@@ -303,7 +347,15 @@ class TestProximityGate:
         )
         assert evaluate_proximity(result(proximity_events=events), POLICY).status is GateStatus.FAIL
 
-    def test_low_confidence_events_are_ignored(self):
+    def test_low_confidence_alarm_is_unassessable_not_ignored(self):
+        """This test previously asserted PASS, which locked in a P0.
+
+        Discarding a 1mm approach to the common bile duct because the detector
+        was only 10% sure, then reporting "no instrument approached within the
+        alarm distance", is a false statement on an artifact that can be
+        adverse to a clinician. The gate cannot see clearly, so it must not
+        clear.
+        """
         events = (
             ProximityEvent(
                 structure=CriticalStructure.COMMON_BILE_DUCT,
@@ -312,7 +364,9 @@ class TestProximityGate:
                 confidence=0.1,
             ),
         )
-        assert evaluate_proximity(result(proximity_events=events), POLICY).status is GateStatus.PASS
+        gate = evaluate_proximity(result(proximity_events=events), POLICY)
+        assert gate.status is GateStatus.NOT_ASSESSABLE
+        assert not gate.is_clear
 
     def test_approach_to_a_non_critical_structure_is_ignored(self):
         """Touching the cystic duct is the operation, not a near-miss."""
@@ -378,61 +432,67 @@ class TestBleedingGate:
 class TestGateSetRefusesToCollapse:
     """Section 7.1: hard gates never average into a score."""
 
-    def test_float_raises(self, chole):
-        gates = evaluate_all(result(), chole)
+    def test_float_raises(self, episode, chole):
+        gates = evaluate_all(result(), episode, chole)
         with pytest.raises(ScoreContractError, match="no scalar value"):
             float(gates)
 
-    def test_int_raises(self, chole):
-        gates = evaluate_all(result(), chole)
+    def test_int_raises(self, episode, chole):
+        gates = evaluate_all(result(), episode, chole)
         with pytest.raises(ScoreContractError, match="no scalar value"):
             int(gates)
 
-    def test_bool_raises_so_the_question_must_be_named(self, chole):
+    def test_bool_raises_so_the_question_must_be_named(self, episode, chole):
         """`if gates:` reads as 'did it pass' but would mean 'is it non-empty'."""
-        gates = evaluate_all(result(), chole)
+        gates = evaluate_all(result(), episode, chole)
         with pytest.raises(ScoreContractError, match="no truth value"):
             bool(gates)
 
-    def test_sum_raises(self, chole):
-        gates = evaluate_all(result(), chole)
-        with pytest.raises(ScoreContractError):
-            float(gates) + 1
+    def test_sum_raises(self, episode, chole):
+        """Calls sum() rather than re-testing float(), which the old test did."""
+        gates = evaluate_all(result(), episode, chole)
+        with pytest.raises(TypeError):
+            sum(gates)  # type: ignore[arg-type]
+
+    def test_iteration_yields_gate_results_not_field_tuples(self, episode, chole):
+        """pydantic's default __iter__ would yield ("results", ...) pairs."""
+        gates = evaluate_all(result(), episode, chole)
+        assert [g.gate for g in gates] == [r.gate for r in gates.results]
 
 
 class TestGateSetQueries:
-    def test_clean_episode_is_all_clear(self, chole):
-        gates = evaluate_all(result(), chole)
+    def test_clean_episode_is_all_clear(self, episode, chole):
+        gates = evaluate_all(result(), episode, chole)
         assert gates.all_clear
         assert not gates.any_failed
 
-    def test_unassessable_gate_blocks_all_clear(self, chole):
+    def test_unassessable_gate_blocks_all_clear(self, episode, chole):
         """An episode nobody could evaluate has not been cleared."""
-        gates = evaluate_all(result(cvs=()), chole)
+        gates = evaluate_all(result(cvs=()), episode, chole)
         assert not gates.all_clear
         assert not gates.any_failed
         assert len(gates.unassessable) == 1
 
-    def test_not_applicable_gate_blocks_all_clear(self, prostatectomy):
-        assert not evaluate_all(result(), prostatectomy).all_clear
+    def test_not_applicable_gate_blocks_all_clear(self, episode, prostatectomy):
+        assert not evaluate_all(result(), episode, prostatectomy).all_clear
 
-    def test_failed_gate_is_reported(self, chole):
+    def test_failed_gate_is_reported(self, episode, chole):
         events = (
             BleedingEvent(
                 severity=BleedingSeverity.MAJOR, start_s=300.0, end_s=340.0, confidence=0.9
             ),
         )
-        gates = evaluate_all(result(bleeding_events=events), chole)
+        gates = evaluate_all(result(bleeding_events=events), episode, chole)
         assert gates.any_failed
         assert gates.failed[0].gate is GateId.BLEEDING
 
-    def test_every_gate_is_retrievable_by_id(self, chole):
-        gates = evaluate_all(result(), chole)
+    def test_every_gate_is_retrievable_by_id(self, episode, chole):
+        gates = evaluate_all(result(), episode, chole)
         assert len(gates) == 3
         for gate_id in GateId:
             assert gates.get(gate_id) is not None
 
-    def test_every_result_carries_a_reason_and_backend(self, chole):
-        for gate in evaluate_all(result(), chole).results:
+    def test_every_result_carries_a_reason_and_backend(self, episode, chole):
+        for gate in evaluate_all(result(), episode, chole).results:
             assert gate.reason
             assert gate.perception == "expert-annotation@1"

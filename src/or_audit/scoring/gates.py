@@ -21,19 +21,21 @@ Three properties are enforced rather than documented:
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from enum import StrEnum
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from or_audit.domain.entities import Procedure
-from or_audit.domain.enums import GateStatus
-from or_audit.errors import ScoreContractError
+from or_audit.domain.entities import Episode, Procedure
+from or_audit.domain.enums import GateStatus, MediaKind
+from or_audit.errors import DeidentificationBoundaryError, ScoreContractError
 from or_audit.perception.observations import (
     BLEEDING_RANK,
     BleedingSeverity,
     CriticalStructure,
     CvsCriterion,
+    ObservationKind,
     PerceptionResult,
     SurgicalPhase,
 )
@@ -97,6 +99,17 @@ class SafetyGateSet(BaseModel):
     def __len__(self) -> int:
         """Number of gates evaluated."""
         return len(self.results)
+
+    def __iter__(self) -> Iterator[GateResult]:  # type: ignore[override]
+        """Iterate the gate results.
+
+        Overrides pydantic's default, which yields ``(field_name, value)``
+        tuples. That default made ``list(gates)`` return ``[("results", ...)]``
+        and ``sum(gates)`` fail with an unhelpful message about tuples, both of
+        which invite the caller to conclude the model is misshapen rather than
+        that the operation is disallowed.
+        """
+        return iter(self.results)
 
     def __float__(self) -> float:
         """Always raises. Gates are not a number."""
@@ -200,16 +213,32 @@ def evaluate_cvs(result: PerceptionResult, procedure: Procedure, policy: GatePol
     not_achieved: list[str] = []
     achieved_at: list[float] = []
 
+    if not result.assessed(ObservationKind.CVS):
+        return GateResult(
+            gate=GateId.CVS,
+            status=GateStatus.NOT_ASSESSABLE,
+            reason=(
+                f"{result.identity} did not assess the critical view, so nothing "
+                f"is known about it either way"
+            ),
+            perception=result.identity,
+        )
+
     for criterion in CvsCriterion:
         obs = result.cvs_observation(criterion)
         if obs is None or obs.achieved is None:
             missing.append(criterion.value)
             continue
-        if obs.achieved is False:
-            not_achieved.append(criterion.value)
-            continue
+        # The floor is applied BEFORE reading ``achieved``, in both directions.
+        # Below it the policy defines the observation as no evidence, and FAIL
+        # is the worst verdict available -- resting it on evidence the policy
+        # calls absent would be indefensible under section 9 and contradicts
+        # this gate's own documented contract.
         if obs.confidence < policy.min_confidence:
             low_confidence.append(f"{criterion.value}({obs.confidence:.2f})")
+            continue
+        if obs.achieved is False:
+            not_achieved.append(criterion.value)
             continue
         # ``at_s`` is guaranteed present when achieved is True.
         achieved_at.append(obs.at_s or 0.0)
@@ -242,7 +271,9 @@ def evaluate_cvs(result: PerceptionResult, procedure: Procedure, policy: GatePol
             evidence=tuple(sorted(missing) + sorted(low_confidence)),
         )
 
-    clipping = result.phase_span(SurgicalPhase.CLIPPING_AND_CUTTING)
+    clipping = result.phase_span(
+        SurgicalPhase.CLIPPING_AND_CUTTING, min_confidence=policy.min_confidence
+    )
     if clipping is None:
         return GateResult(
             gate=GateId.CVS,
@@ -257,14 +288,18 @@ def evaluate_cvs(result: PerceptionResult, procedure: Procedure, policy: GatePol
 
     clipping_start = clipping[0]
     late = max(achieved_at)
-    if late > clipping_start:
+    # Strictly before. A view completed at the same instant the irreversible
+    # step begins has not been shown to precede it, and passing it would force
+    # the reason string to say "satisfied at 200.0s, before clipping began at
+    # 200.0s".
+    if late >= clipping_start:
         return GateResult(
             gate=GateId.CVS,
             status=GateStatus.FAIL,
             reason=(
-                f"the critical view was completed at {late:.1f}s, after clipping "
-                f"and cutting began at {clipping_start:.1f}s; the view must "
-                f"precede division of the cystic duct"
+                f"the critical view was completed at {late:.3f}s and clipping and "
+                f"cutting began at {clipping_start:.3f}s; the view must be complete "
+                f"strictly before division of the cystic duct"
             ),
             perception=result.identity,
             evidence=(f"completed_at={late:.1f}s", f"clipping_start={clipping_start:.1f}s"),
@@ -289,8 +324,25 @@ def evaluate_proximity(result: PerceptionResult, policy: GatePolicy) -> GateResu
     reported as unassessable, because "we could not measure it" and "it was
     far away" are different claims.
     """
+    if not result.assessed(ObservationKind.PROXIMITY):
+        return GateResult(
+            gate=GateId.CRITICAL_STRUCTURE_PROXIMITY,
+            status=GateStatus.NOT_ASSESSABLE,
+            reason=(
+                f"{result.identity} did not assess instrument proximity, so no "
+                f"absence of near-misses has been established"
+            ),
+            perception=result.identity,
+        )
+
     relevant = [e for e in result.proximity_events if e.structure in NEVER_INJURE]
     confident = [e for e in relevant if e.confidence >= policy.min_confidence]
+    # Below-floor observations are NOT discarded. Dropping a 1mm approach to
+    # the common bile duct because the detector was only 10% sure, then
+    # reporting "no instrument approached within the alarm distance", is a
+    # false statement on an artifact that can be adverse to a clinician. The
+    # gate cannot see clearly, so it does not clear.
+    uncertain = [e for e in relevant if e.confidence < policy.min_confidence]
 
     alarms = [
         e
@@ -310,16 +362,20 @@ def evaluate_proximity(result: PerceptionResult, policy: GatePolicy) -> GateResu
         )
 
     unmeasured = [e for e in confident if e.distance_mm is None]
-    if unmeasured:
+    if unmeasured or uncertain:
+        detail = []
+        if unmeasured:
+            detail.append(f"{len(unmeasured)} approach(es) without a measurable distance")
+        if uncertain:
+            detail.append(
+                f"{len(uncertain)} approach(es) below the {policy.min_confidence} confidence floor"
+            )
         return GateResult(
             gate=GateId.CRITICAL_STRUCTURE_PROXIMITY,
             status=GateStatus.NOT_ASSESSABLE,
-            reason=(
-                f"{len(unmeasured)} approach(es) to a critical structure were "
-                f"observed without a measurable distance"
-            ),
+            reason=f"instrument proximity could not be assessed: {'; '.join(detail)}",
             perception=result.identity,
-            evidence=tuple(f"{e.structure.value}@{e.at_s:.1f}s" for e in unmeasured),
+            evidence=tuple(f"{e.structure.value}@{e.at_s:.1f}s" for e in unmeasured + uncertain),
         )
 
     return GateResult(
@@ -332,11 +388,31 @@ def evaluate_proximity(result: PerceptionResult, policy: GatePolicy) -> GateResu
 
 def evaluate_bleeding(result: PerceptionResult, policy: GatePolicy) -> GateResult:
     """Fail on bleeding at or above the configured severity."""
-    worst = result.worst_bleeding()
+    if not result.assessed(ObservationKind.BLEEDING):
+        return GateResult(
+            gate=GateId.BLEEDING,
+            status=GateStatus.NOT_ASSESSABLE,
+            reason=(
+                f"{result.identity} did not assess bleeding, so no absence of it "
+                f"has been established"
+            ),
+            perception=result.identity,
+        )
+
+    # Floored in both directions, symmetrically with the CVS gate. A noisy
+    # detector must neither fail a clinician on evidence the policy calls
+    # absent, nor let a low-confidence major bleed read as a clean pass.
+    confident = [e for e in result.bleeding_events if e.confidence >= policy.min_confidence]
+    uncertain = [e for e in result.bleeding_events if e.confidence < policy.min_confidence]
+    worst = (
+        max((e.severity for e in confident), key=lambda severity: BLEEDING_RANK[severity])
+        if confident
+        else BleedingSeverity.NONE
+    )
     if BLEEDING_RANK[worst] >= BLEEDING_RANK[policy.bleeding_fail_at]:
         events = [
             e
-            for e in result.bleeding_events
+            for e in confident
             if BLEEDING_RANK[e.severity] >= BLEEDING_RANK[policy.bleeding_fail_at]
         ]
         return GateResult(
@@ -346,23 +422,82 @@ def evaluate_bleeding(result: PerceptionResult, policy: GatePolicy) -> GateResul
             perception=result.identity,
             evidence=tuple(f"{e.severity.value}@{e.start_s:.1f}s" for e in events),
         )
+    if uncertain:
+        return GateResult(
+            gate=GateId.BLEEDING,
+            status=GateStatus.NOT_ASSESSABLE,
+            reason=(
+                f"{len(uncertain)} bleeding observation(s) fell below the "
+                f"{policy.min_confidence} confidence floor, so severity could "
+                f"not be established"
+            ),
+            perception=result.identity,
+            evidence=tuple(f"{e.severity.value}@{e.start_s:.1f}s" for e in uncertain),
+        )
+
     return GateResult(
         gate=GateId.BLEEDING,
         status=GateStatus.PASS,
         reason=(
-            f"worst observed bleeding was {worst.value}, below the "
-            f"{policy.bleeding_fail_at.value} threshold"
+            f"bleeding was assessed; worst confidently observed severity was "
+            f"{worst.value}, below the {policy.bleeding_fail_at.value} threshold"
         ),
         perception=result.identity,
     )
 
 
+def verify_binding(result: PerceptionResult, episode: Episode) -> None:
+    """Confirm ``result`` was computed from ``episode``'s cleared media.
+
+    The de-identification boundary has to be load-bearing here, not only in the
+    backend. ``PerceptionResult`` is an ordinary value object: anyone can build
+    one by hand, and without this check a hand-built result would be scored
+    without any episode, any clearance, or any relationship to real media.
+    Carrying the digests is not enough on its own -- they have to be checked
+    against something.
+
+    Raises:
+        DeidentificationBoundaryError: If the episode is not cleared, or if the
+            result's media or attestation digests do not match it.
+    """
+    episode.require_readable()
+    video = tuple(a for a in episode.readable_media if a.kind is MediaKind.ENDOSCOPIC_VIDEO)
+    expected_media = {a.sha256 for a in video}
+    expected_attestations = {
+        a.deid_attestation_sha256 for a in video if a.deid_attestation_sha256 is not None
+    }
+
+    if set(result.media_sha256) != expected_media:
+        msg = (
+            f"perception result from {result.identity} names media digests that do "
+            f"not match episode {episode.id}; a result may only be scored against "
+            f"the episode it was computed from"
+        )
+        raise DeidentificationBoundaryError(msg)
+    if set(result.deid_attestation_sha256) != expected_attestations:
+        msg = (
+            f"perception result from {result.identity} names de-identification "
+            f"attestations that do not match episode {episode.id}"
+        )
+        raise DeidentificationBoundaryError(msg)
+
+
 def evaluate_all(
     result: PerceptionResult,
+    episode: Episode,
     procedure: Procedure,
     policy: GatePolicy | None = None,
 ) -> SafetyGateSet:
-    """Evaluate every hard gate for one episode."""
+    """Evaluate every hard gate for one episode.
+
+    Takes the episode as well as the result so the de-identification binding
+    can be verified rather than assumed.
+
+    Raises:
+        DeidentificationBoundaryError: If ``result`` is not bound to
+            ``episode``'s cleared media.
+    """
+    verify_binding(result, episode)
     active = policy or GatePolicy()
     return SafetyGateSet(
         results=(
