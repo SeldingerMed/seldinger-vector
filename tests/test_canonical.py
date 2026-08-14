@@ -113,6 +113,26 @@ class TestStructuralRules:
         """Sequences are ordered data; reordering them must change the hash."""
         assert digest([1, 2]) != digest([2, 1])
 
+    def test_keys_sort_by_utf16_code_unit_not_code_point(self):
+        """RFC 8785 orders keys by UTF-16 code unit.
+
+        U+10000 encodes as the surrogate pair D800 DC00, so UTF-16 places it
+        before U+E000..U+FFFF, while Python's default code-point sort places
+        it after. Getting this wrong silently produces digests no conforming
+        implementation can reproduce.
+        """
+        rendered = canonical_json(dict.fromkeys(["\uff21", "\U00010000", "a", "\ue000"], 1))
+        assert rendered == '{"a":1,"\U00010000":1,"\ue000":1,"\uff21":1}'
+
+    def test_key_order_is_independent_of_insertion_order(self):
+        keys = ["\uff21", "\U00010000", "a", "\ue000"]
+        forward = canonical_json(dict.fromkeys(keys, 1))
+        backward = canonical_json(dict.fromkeys(reversed(keys), 1))
+        assert forward == backward
+
+    def test_supplementary_characters_are_not_escaped(self):
+        assert canonical_json({"k": "\U0001f600"}) == '{"k":"\U0001f600"}'
+
     def test_enum_serializes_as_its_value(self):
         assert canonical_json({"c": _Colour.RED}) == '{"c":"red"}'
 

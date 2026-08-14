@@ -9,8 +9,9 @@ claim than one a third party can check in any language.
 
 The output therefore follows RFC 8785 (JSON Canonicalization Scheme):
 
-* Object keys sorted by UTF-16 code unit, which for our key space (ASCII
-  identifiers) coincides with code-point order.
+* Object keys sorted by UTF-16 code unit. This is not the same as Python's
+  default code-point order: the two disagree for supplementary-plane
+  characters, so the ordering is done explicitly rather than assumed.
 * No insignificant whitespace.
 * UTF-8, no ASCII escaping, so equal strings hash equally regardless of
   whether they happen to be ASCII.
@@ -102,6 +103,21 @@ def _format_number(value: int | float) -> str:
     return f"-{text}" if negative else text
 
 
+def _utf16_sort_key(key: object) -> bytes:
+    """Sort key giving RFC 8785 object-key ordering.
+
+    JCS orders keys by UTF-16 code unit, not by code point. The two disagree
+    for supplementary-plane characters: U+10000 encodes as the surrogate pair
+    D800 DC00, so UTF-16 places it *before* U+E000..U+FFFF, while code-point
+    order places it after. Comparing big-endian UTF-16 bytes reproduces the
+    UTF-16 ordering exactly.
+
+    Non-string keys sort first and are rejected by the caller, which produces
+    a clearer error than a TypeError raised from inside ``sorted``.
+    """
+    return key.encode("utf-16-be") if isinstance(key, str) else b""
+
+
 def _escape(text: str) -> str:
     """Escape a string per RFC 8785 (the JSON minimal-escape set)."""
     out = ['"']
@@ -150,7 +166,7 @@ def _render(value: Any) -> str:
         return _escape(value.astimezone(UTC).isoformat().replace("+00:00", "Z"))
     if isinstance(value, Mapping):
         items = []
-        for key in sorted(value):
+        for key in sorted(value, key=_utf16_sort_key):
             if not isinstance(key, str):
                 msg = f"object keys must be strings for canonical form, got {type(key).__name__}"
                 raise TypeError(msg)
