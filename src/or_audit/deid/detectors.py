@@ -140,8 +140,9 @@ def detect_out_of_body(
     if not indices:
         return ()
 
-    frame_period = 1.0 / source.frame_rate
-    recording_end_s = source.frame_count * frame_period
+    rate = source.frame_rate
+    frame_count = source.frame_count
+    recording_end_s = frame_count / rate
 
     # A flagged sample covers the unsampled gap on BOTH sides of it.
     #
@@ -159,15 +160,24 @@ def detect_out_of_body(
         frame = source.read(index)
         if redness_ratio(frame.pixels) > threshold:
             continue
-        start_s = (
-            source.read(indices[position - 1]).timestamp_s if position > 0 else frame.timestamp_s
-        )
-        end_s = (
-            source.read(indices[position + 1]).timestamp_s + frame_period
-            if position + 1 < len(indices)
-            else recording_end_s
-        )
-        flagged.append((start_s, min(end_s, recording_end_s)))
+        # Cover the gap, not the neighbours. The neighbouring samples were
+        # themselves examined: had one been out-of-body it would have been
+        # flagged in its own right. Only the unexamined frames strictly
+        # between them are uncertain, so the span runs from one frame after
+        # the previous sample up to the next sample exclusive.
+        #
+        # At stride 1 there is no gap and this collapses to the flagged frame
+        # alone. Expanding to the neighbours regardless would destroy one
+        # in-body frame either side of every exit -- safe, but 66ms of
+        # clinical footage discarded for no information gain.
+        #
+        # Bounds are derived from frame indices and divided once, never summed
+        # in seconds. ``63/30 + 1/30`` is not ``64/30`` in binary floating
+        # point, and that discrepancy is enough to leave the boundary frame
+        # outside its own half-open segment -- a one-frame leak.
+        start_index = indices[position - 1] + 1 if position > 0 else index
+        end_index = indices[position + 1] if position + 1 < len(indices) else frame_count
+        flagged.append((start_index / rate, min(end_index, frame_count) / rate))
 
     return _merge_and_filter(
         flagged, min_duration_s=min_duration_s, recording_end_s=recording_end_s

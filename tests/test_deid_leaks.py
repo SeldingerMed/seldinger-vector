@@ -548,3 +548,52 @@ class TestCoarseSamplingRequiresInformedConsent:
 
     def test_the_default_needs_no_justification(self):
         assert DeidPolicy().sampling_justification is None
+
+
+class TestRedactionIsExactNotMerelySafe:
+    """Coverage matches the gap, so no clinical footage is thrown away.
+
+    Original defect: the span for a flagged sample ran from the *previous*
+    sample to the *next* sample, so at stride 1 every exit destroyed one
+    in-body frame on each side. Over-redaction fails safe, but it is still
+    66ms of anatomy discarded for no information gain, and it was undocumented.
+
+    A second, sharper defect hid inside the fix: computing the start as
+    ``t(prev) + frame_period`` is not ``t(prev + 1)`` in binary floating point,
+    and the discrepancy left the boundary frame outside its own half-open
+    segment. That is a one-frame leak. Bounds are now derived from frame
+    indices and divided once.
+    """
+
+    @pytest.mark.parametrize("onset", [0, 1, 8, 16, 17, 40, 100])
+    @pytest.mark.parametrize("length", [1, 2, 4, 13])
+    def test_exactly_the_out_of_body_frames_are_dropped(self, onset, length):
+        total = 128
+        pattern = [
+            out_of_body() if onset <= i < onset + length else in_body() for i in range(total)
+        ]
+        source = InMemoryFrameSource(pattern, frame_rate=FRAME_RATE)
+        segments = detect_out_of_body(source, stride=1)
+        plan = RedactionPlan(
+            policy_version="1",
+            detectors=("redness-ratio@1",),
+            source_frame_count=total,
+            source_frame_rate=FRAME_RATE,
+            dropped_segments=tuple(
+                PlannedSegment(start_s=s.start_s, end_s=s.end_s, reason="exit") for s in segments
+            ),
+        )
+        kept = list(apply_plan(source, plan))
+        assert not [f for f in kept if is_out_of_body(f)], "out-of-body frame survived"
+        assert len(kept) == total - length, "in-body frames were discarded unnecessarily"
+
+    def test_clean_recording_is_passed_through_whole(self):
+        pattern = [in_body()] * 128
+        source = InMemoryFrameSource(pattern, frame_rate=FRAME_RATE)
+        assert detect_out_of_body(source, stride=1) == ()
+
+    def test_boundary_frame_is_inside_its_own_segment(self):
+        """The float-summation bug showed up only at specific frame indices."""
+        for onset in range(60, 70):
+            pattern = [out_of_body() if onset <= i < onset + 25 else in_body() for i in range(90)]
+            assert leaked_frame_count(pattern, stride=1) == 0, f"onset {onset}"
