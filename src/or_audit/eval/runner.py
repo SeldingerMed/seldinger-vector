@@ -2,6 +2,7 @@
 
 P1: gym-policy (Lumen when installed; tests inject a factory).
 P2: video-predict (labels vs JSON; AngioStress adds a claim footer).
+P3: cartesian jobs and trajectory reconstitution live beside this module.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from or_audit.eval.predict import (
     load_items,
     vector_from_prediction,
 )
+from or_audit.eval.reconstitute import assert_trajectory_matches_vector
 from or_audit.eval.task import TaskSpec
 from or_audit.eval.vector import project, vector_from_lumen_info
 
@@ -62,13 +64,18 @@ def run_job(
     assert_bind(task, agent)
     task.assert_runnable()
     episodes = n if n is not None else task.environment.n_eval_episodes
+    if episodes < 1:
+        msg = f"n must be >= 1, got {episodes}"
+        raise TaskContractError(msg)
+    extra: dict[str, Any] = {}
     if task.port.id is PortId.GYM_POLICY:
-        result = _run_gym(
+        result, safety = _run_gym(
             task=task,
             agent=agent,
             n=episodes,
             gym_factory=gym_factory,
         )
+        extra["safety_max_pen"] = safety
     elif task.port.id is PortId.VIDEO_PREDICT:
         result = _run_predict(
             task=task,
@@ -87,6 +94,7 @@ def run_job(
         "n": result.n,
         "world_pin": task.environment.world_pin,
         "port": task.port.id.value,
+        **extra,
     }
     write_job(out, config=config, result=result)
     return result
@@ -98,7 +106,7 @@ def _run_gym(
     agent: AgentPackage,
     n: int,
     gym_factory: GymFactory | None,
-) -> JobResult:
+) -> tuple[JobResult, float]:
     if agent.kind is AgentKind.POLICY and not agent.entrypoint:
         msg = (
             f"agent {agent.id} is kind=policy with no entrypoint; P1 runs "
@@ -140,7 +148,7 @@ def _run_gym(
                 projection=projection,
             )
         )
-    return assemble_job_result(task=task, agent=agent, trials=tuple(trials))
+    return assemble_job_result(task=task, agent=agent, trials=tuple(trials)), safety
 
 
 def _run_predict(
@@ -207,6 +215,7 @@ def replay_job(
     else:
         agent_dir = None
         agent = builtin_random_agent()
+    assert_trajectory_matches_vector(out, task=task, result=previous, config=config)
     rerun = run_job(
         task=task,
         task_dir=task_dir,

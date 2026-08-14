@@ -107,7 +107,13 @@ uv run or-audit run -t docs/examples/tasks/video-nextstep \
     -a docs/examples/agents/example-video-predictor --out /tmp/or-audit-video
 uv run or-audit run -t docs/examples/tasks/angiostress-dias \
     -a docs/examples/agents/seldingermed-cath-seg --out /tmp/or-audit-angio
+uv run or-audit run -c docs/examples/jobs/lumen-nav-random -n 2 \
+    --out /tmp/or-audit-job
+uv run or-audit export-rl /tmp/or-audit-job --projection gated_reach_v0 \
+    --out /tmp/rollouts.jsonl
 ```
+
+`run -c` is the cartesian product of agents × tasks in `job.toml`. `export-rl` writes a versioned projection jsonl for RL; the leaderboard still reads the vector. Homemade projection ids are refused. The in-tree `lumen-nav-safe` task is valid but unpinned — set `world_pin` (tests inject a factory) before a live gym run.
 
 P1 gym-policy against live Lumen needs `world_pin` set and seldinger-lumen installed; `or-audit[lumen]` only adds gymnasium. Default tests inject a factory so Newton is not a CI dependency.
 

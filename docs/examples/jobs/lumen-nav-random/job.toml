@@ -1,0 +1,16 @@
+# Cartesian product of agents × tasks × n. Paths are relative to this file.
+# The in-tree lumen-nav-safe task is valid but unpinned; set world_pin (or copy
+# the task) before `or-audit run -c`. Training stays in Lumen; this job is eval.
+#
+#   or-audit run -c docs/examples/jobs/lumen-nav-random --out jobs/lumen-nav-random
+#   or-audit export-rl jobs/lumen-nav-random --projection gated_reach_v0 --out rollouts.jsonl
+
+format_version = "1"
+id = "lumen-nav-random"
+n = 30
+tasks = ["../../tasks/lumen-nav-safe"]
+agents = ["random"]
+
+[projection]
+id = "gated_reach_v0"
+version = "0"

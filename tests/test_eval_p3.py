@@ -1,0 +1,372 @@
+"""P3: job.toml cartesian runs, export-rl, trajectory reconstitution."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from or_audit.cli import main
+from or_audit.errors import ScoreContractError, TaskContractError
+from or_audit.eval.cartesian import (
+    pair_dir_name,
+    read_manifest,
+    replay_cartesian,
+    run_cartesian_job,
+)
+from or_audit.eval.enums import ProjectionId
+from or_audit.eval.export_rl import export_rl
+from or_audit.eval.job import read_job_result
+from or_audit.eval.job_config import load_job_config, resolve_job
+from or_audit.eval.loader import load_agent, load_task
+from or_audit.eval.reconstitute import reconstitute_trial_vector
+from or_audit.eval.runner import replay_job, run_job
+from tests.test_eval_run import (
+    ROOT,
+    VIDEO_AGENT,
+    VIDEO_TASK,
+    _fake,
+    _pinned_lumen,
+)
+
+EXAMPLE_JOB = ROOT / "docs" / "examples" / "jobs" / "lumen-nav-random"
+RANDOM_AGENT = ROOT / "docs" / "examples" / "agents" / "seldingermed-random"
+
+
+def _write_job(
+    tmp_path: Path,
+    task_dir: Path,
+    *,
+    n: int = 2,
+    agents: list[str] | None = None,
+    extra: str = "",
+) -> Path:
+    dest = tmp_path / "job-config"
+    dest.mkdir()
+    agent_list = agents if agents is not None else ["random"]
+    agents_lit = ", ".join(json.dumps(a) for a in agent_list)
+    (dest / "job.toml").write_text(
+        "\n".join(
+            [
+                'format_version = "1"',
+                'id = "lumen-nav-random"',
+                f"n = {n}",
+                f"tasks = [{json.dumps(str(task_dir))}]",
+                f"agents = [{agents_lit}]",
+                extra,
+                "[projection]",
+                'id = "gated_reach_v0"',
+                'version = "0"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return dest
+
+
+def test_example_job_toml_loads() -> None:
+    cfg = load_job_config(EXAMPLE_JOB)
+    assert cfg.id == "lumen-nav-random"
+    assert cfg.agents == ("random",)
+    assert cfg.projection is not None
+    assert cfg.projection.id is ProjectionId.GATED_REACH_V0
+    resolved = resolve_job(EXAMPLE_JOB)
+    assert resolved.task_paths[0].name == "lumen-nav-safe"
+    assert resolved.agent_refs == ("random",)
+
+
+def test_job_refuses_empty_agents(tmp_path: Path) -> None:
+    dest = tmp_path / "empty"
+    dest.mkdir()
+    (dest / "job.toml").write_text(
+        'format_version = "1"\nid = "empty-job"\ntasks = ["x"]\nagents = []\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(TaskContractError, match="at least one agent"):
+        load_job_config(dest)
+
+
+def test_job_refuses_duplicate_tasks(tmp_path: Path) -> None:
+    dest = tmp_path / "dup"
+    dest.mkdir()
+    (dest / "job.toml").write_text(
+        'format_version = "1"\nid = "dup-job"\ntasks = ["a", "a"]\nagents = ["random"]\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(TaskContractError, match="same task path twice"):
+        load_job_config(dest)
+
+
+def test_job_refuses_extra_keys(tmp_path: Path) -> None:
+    dest = tmp_path / "extra"
+    dest.mkdir()
+    (dest / "job.toml").write_text(
+        'format_version = "1"\nid = "extra-job"\n'
+        'tasks = ["a"]\nagents = ["random"]\nreward = 1.0\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(TaskContractError, match="failed validation"):
+        load_job_config(dest)
+
+
+def test_job_missing_agent_path(tmp_path: Path) -> None:
+    dest = tmp_path / "missing-agent"
+    dest.mkdir()
+    (dest / "job.toml").write_text(
+        'format_version = "1"\nid = "missing-agent"\n'
+        f"tasks = [{json.dumps(str(VIDEO_TASK))}]\n"
+        'agents = ["nope/not-an-agent"]\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(TaskContractError, match="does not exist"):
+        resolve_job(dest)
+
+
+def test_cartesian_random_gym_export_unsafe_is_zero(tmp_path: Path) -> None:
+    task_dir = _pinned_lumen(tmp_path)
+    job_dir = _write_job(tmp_path, task_dir, n=2)
+    out = tmp_path / "jobs" / "lumen-nav-random"
+    manifest = run_cartesian_job(resolve_job(job_dir), out=out, gym_factory=_fake)
+    assert len(manifest.pairs) == 1
+    pair = out / manifest.pairs[0].dir
+    assert pair.name == pair_dir_name("lumen-nav-safe", "seldingermed/random")
+    result = read_job_result(pair)
+    raw1 = result.trials[1].vector.metric("raw_success")
+    safe1 = result.trials[1].vector.metric("safe_success")
+    assert raw1 is not None
+    assert raw1.value is True
+    assert safe1 is not None
+    assert safe1.value is False
+
+    rollouts = tmp_path / "rollouts.jsonl"
+    n = export_rl(out, projection_id=ProjectionId.GATED_REACH_V0, out=rollouts)
+    assert n == 2
+    rows = [json.loads(line) for line in rollouts.read_text(encoding="utf-8").splitlines()]
+    by_seed = {row["seed"]: row for row in rows}
+    assert by_seed[0]["projection"] == 1.0
+    assert by_seed[1]["projection"] == 0.0
+    assert by_seed[1]["episode_id"] == "lumen-nav-safe-1"
+    assert by_seed[1]["projection_id"] == "gated_reach_v0"
+    assert by_seed[0]["task_id"] == "lumen-nav-safe"
+
+    trial0 = pair / "trial-lumen-nav-safe-0"
+    recon = reconstitute_trial_vector(
+        trial0,
+        task=load_task(task_dir),
+        agent_identity=result.agent_identity,
+        seed=0,
+        safety_max_pen=0.3,
+    )
+    assert recon == result.trials[0].vector
+
+
+def test_cartesian_replay_matches_manifest(tmp_path: Path) -> None:
+    task_dir = _pinned_lumen(tmp_path)
+    out = tmp_path / "jobs" / "lumen-nav-random"
+    first = run_cartesian_job(
+        resolve_job(_write_job(tmp_path, task_dir, n=2)),
+        out=out,
+        gym_factory=_fake,
+    )
+    replayed = replay_cartesian(
+        out,
+        load_task=load_task,
+        load_agent=load_agent,
+        gym_factory=_fake,
+    )
+    assert replayed.head == first.head
+
+
+def test_pair_dir_collision_is_refused(tmp_path: Path) -> None:
+    task_dir = _pinned_lumen(tmp_path)
+    job_dir = _write_job(
+        tmp_path,
+        task_dir,
+        agents=["random", str(RANDOM_AGENT)],
+    )
+    with pytest.raises(TaskContractError, match="collides"):
+        run_cartesian_job(resolve_job(job_dir), out=tmp_path / "out", gym_factory=_fake)
+
+
+def test_cartesian_n_zero_is_refused(tmp_path: Path) -> None:
+    task_dir = _pinned_lumen(tmp_path)
+    job_dir = _write_job(tmp_path, task_dir, n=2)
+    with pytest.raises(TaskContractError, match="n must be >= 1"):
+        run_cartesian_job(
+            resolve_job(job_dir),
+            out=tmp_path / "out",
+            n=0,
+            gym_factory=_fake,
+        )
+
+
+def test_export_rl_refuses_video_gated_reach(tmp_path: Path) -> None:
+    out = tmp_path / "video-job"
+    run_job(
+        task=load_task(VIDEO_TASK),
+        task_dir=VIDEO_TASK,
+        agent=load_agent(VIDEO_AGENT),
+        agent_dir=VIDEO_AGENT,
+        out=out,
+    )
+    with pytest.raises(TaskContractError, match="diverged"):
+        export_rl(
+            out,
+            projection_id=ProjectionId.GATED_REACH_V0,
+            out=tmp_path / "nope.jsonl",
+        )
+
+
+def test_export_rl_refuses_stored_projection_disagreement(tmp_path: Path) -> None:
+    task_dir = _pinned_lumen(tmp_path)
+    out = tmp_path / "job"
+    run_cartesian_job(
+        resolve_job(_write_job(tmp_path, task_dir, n=2)),
+        out=out,
+        gym_factory=_fake,
+    )
+    pair = out / read_manifest(out).pairs[0].dir
+    result_path = pair / "result.json"
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    payload["trials"][1]["projection"] = 1.0
+    result_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    with pytest.raises(ScoreContractError, match="homemade float"):
+        export_rl(pair, projection_id=ProjectionId.GATED_REACH_V0, out=tmp_path / "x.jsonl")
+
+
+def test_export_rl_missing_job(tmp_path: Path) -> None:
+    with pytest.raises(TaskContractError, match="neither a job"):
+        export_rl(tmp_path, projection_id=ProjectionId.GATED_REACH_V0, out=tmp_path / "x.jsonl")
+
+
+def test_trajectory_mismatch_fails_replay(tmp_path: Path) -> None:
+    task_dir = _pinned_lumen(tmp_path)
+    out = tmp_path / "jobs" / "lumen-nav-random"
+    run_cartesian_job(
+        resolve_job(_write_job(tmp_path, task_dir, n=2)),
+        out=out,
+        gym_factory=_fake,
+    )
+    pair = out / read_manifest(out).pairs[0].dir
+    traj_path = pair / "trial-lumen-nav-safe-0" / "trajectory.json"
+    steps = json.loads(traj_path.read_text(encoding="utf-8"))
+    steps[-1]["info"]["max_pen"] = 0.99
+    steps[-1]["info"]["unsafe"] = True
+    steps[-1]["info"]["safe_success"] = False
+    traj_path.write_text(json.dumps(steps) + "\n", encoding="utf-8")
+    with pytest.raises(ScoreContractError, match="reconstitutes a different vector"):
+        replay_job(
+            pair,
+            load_task=load_task,
+            load_agent=load_agent,
+            gym_factory=_fake,
+        )
+
+
+def test_reconstitute_refuses_unknown_trajectory(tmp_path: Path) -> None:
+    trial = tmp_path / "trial-x-0"
+    trial.mkdir()
+    (trial / "trajectory.json").write_text('[{"foo": 1}]\n', encoding="utf-8")
+    with pytest.raises(TaskContractError, match="neither gym-policy nor video-predict"):
+        reconstitute_trial_vector(
+            trial,
+            task=load_task(VIDEO_TASK),
+            agent_identity="example/video-predictor@0+none",
+            seed=0,
+        )
+
+
+def test_cli_run_job_and_export(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("or_audit.eval.runner.make_gym", _fake)
+    task_dir = _pinned_lumen(tmp_path)
+    job_dir = _write_job(tmp_path, task_dir, n=2)
+    out = tmp_path / "cli-job"
+    assert main(["run", "-c", str(job_dir), "--out", str(out)]) == 0
+    captured = capsys.readouterr().out
+    assert "ran: lumen-nav-random pairs=1" in captured
+    manifest = read_manifest(out)
+    rollouts = tmp_path / "rollouts.jsonl"
+    assert (
+        main(
+            [
+                "export-rl",
+                str(out),
+                "--projection",
+                "gated_reach_v0",
+                "--out",
+                str(rollouts),
+            ]
+        )
+        == 0
+    )
+    assert "exported: 2 episodes" in capsys.readouterr().out
+    rows = [json.loads(line) for line in rollouts.read_text(encoding="utf-8").splitlines()]
+    assert rows[1]["projection"] == 0.0
+    assert main(["replay", str(out), "--expect-head", manifest.head]) == 0
+
+
+def test_cli_run_job_refuses_agent_flag(tmp_path: Path) -> None:
+    assert (
+        main(
+            [
+                "run",
+                "-c",
+                str(EXAMPLE_JOB),
+                "-a",
+                "random",
+                "--out",
+                str(tmp_path / "x"),
+            ]
+        )
+        == 2
+    )
+
+
+def test_cli_run_job_and_task_together(tmp_path: Path) -> None:
+    assert (
+        main(
+            [
+                "run",
+                "-c",
+                str(EXAMPLE_JOB),
+                "-t",
+                str(VIDEO_TASK),
+                "--out",
+                str(tmp_path / "x"),
+            ]
+        )
+        == 2
+    )
+
+
+def test_cli_run_task_requires_agent(tmp_path: Path) -> None:
+    assert main(["run", "-t", str(VIDEO_TASK), "--out", str(tmp_path / "x")]) == 2
+
+
+def test_cli_export_rl_refuses_homemade_projection(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "export-rl",
+                str(tmp_path),
+                "--projection",
+                "mean_reward",
+                "--out",
+                str(tmp_path / "x.jsonl"),
+            ]
+        )
+    assert exc.value.code == 2
+
+
+def test_cli_n_overrides_job_n(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("or_audit.eval.runner.make_gym", _fake)
+    task_dir = _pinned_lumen(tmp_path)
+    job_dir = _write_job(tmp_path, task_dir, n=30)
+    out = tmp_path / "cli-n"
+    assert main(["run", "-c", str(job_dir), "-n", "2", "--out", str(out)]) == 0
+    pair = out / read_manifest(out).pairs[0].dir
+    assert read_job_result(pair).n == 2

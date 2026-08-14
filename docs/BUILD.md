@@ -177,7 +177,7 @@ Agent packages (Harbor’s Agent — identity is `org/name`):
 
 ## 4. Target CLI (Harbor verbs)
 
-P0–P2 implement validate, bind, run, and replay. Later packages fill jobs-as-config, RL export, and the public registry. Do not invent a different vocabulary.
+P0–P3 implement validate, bind, run, replay, jobs-as-config, and RL export. Later packages fill the public registry. Do not invent a different vocabulary.
 
 ```bash
 # P0 — contract
@@ -327,20 +327,20 @@ Each package has a ship artifact and an acceptance test. Do the next package onl
 
 **Acceptance:** AngioStress release audit still passes when invoked through `or-audit run`. A result without the claim footer is invalid. A stranger’s `video-predict` dataset with a different `prediction` slug loads without a harness change (even if we do not yet host their video).
 
-### P3 — Jobs, trajectories, RL export
+### P3 — Jobs, trajectories, RL export (this change)
 
 Harbor’s RL page is: job of trials → reward + token ids. Ours is: job of trials → vector + trajectory + projection.
 
 **Build:**
 
-- `job.toml` / `JobConfig` (agents × tasks × n).
-- Trajectory JSON: steps with action, obs (arrays or image refs), `info`, terminated/truncated.
-- `export-rl` writes jsonl with `projection` float, episode id, task identity. Closed projection `gated_reach_v0`: `0` if any hard gate failed or `diverged`, else `1` iff `raw_success`.
+- `job.toml` / `JobConfig` (agents × tasks × n). `or-audit run -c job.toml` writes a cartesian parent (`manifest.json` + one Harbor job dir per pair).
+- Trajectory JSON: steps with action, obs (arrays or image refs), `info`, terminated/truncated. Replay reconstitutes the vector from that file without trusting a lone stored float.
+- `export-rl` writes jsonl with `projection` float, episode id, task identity. Closed projection `gated_reach_v0`: `0` if any hard gate failed or `diverged`, else `1` iff `raw_success`. The float is recomputed from the vector; a stored projection that disagrees is refused. Homemade projection ids are argparse-refused.
 - Gymnasium vector-env note: training stays in Lumen; *evaluation* of trained checkpoints goes through OR-Audit so the leaderboard cannot be the training reward.
 
 **Acceptance:**
 
-- Train (or load) a trivial policy in Lumen, evaluate it through `or-audit run`, export-rl, and show that a policy with high raw / low safe gets projection `0` on unsafe episodes.
+- Trivial / `random` policy evaluated through `or-audit run` (FakeLumenEnv in CI; live Lumen optional), `export-rl`, and a high-raw / low-safe episode gets projection `0`.
 - Trajectory replay reconstitutes the same vector.
 
 ### P4 — Registry and public leaderboard
@@ -390,6 +390,7 @@ or-audit/                         # this repo — the Harbor analog (harness)
   docs/examples/tasks/            # seed fixtures, not the public corpus
   docs/examples/datasets/
   docs/examples/agents/           # org/name packages
+  docs/examples/jobs/             # cartesian job.toml (P3)
 
 seldinger-lumen/                  # worlds (already)
 angiostress-benchmark/            # first real video-predict dataset (already)
@@ -436,4 +437,4 @@ C-SATS remains the prior for *surgeon scoring*. It is not the prior for this pla
 
 ## 10. Immediate next step
 
-P1 and P2 are in this repository: `or-audit run` / `or-audit replay` for gym-policy (random + optional Lumen) and video-predict (labels vs JSON, AngioStress claim footer). Default CI does not import Newton. Next is P3 — job.toml, trajectories as an RL export, `gated_reach_v0` jsonl — then P4 the public `org/name` registry.
+P1–P3 are in this repository: `or-audit run` / `or-audit replay` / `or-audit run -c job.toml` / `or-audit export-rl` for gym-policy (random + optional Lumen) and video-predict (labels vs JSON, AngioStress claim footer). Default CI does not import Newton. Next is P4 — the public `org/name` registry.

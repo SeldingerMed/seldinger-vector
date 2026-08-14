@@ -3,8 +3,9 @@
 ``demo`` / ``verify-audit`` / ``describe-rule``
     The original credentialing-mode tools. Still work; they are not the wedge.
 ``tasks validate`` / ``tasks describe`` / ``datasets validate`` /
-``agents validate`` / ``bind`` / ``run`` / ``replay``
-    BUILD.md P0-P2: Harbor-shaped eval contract, gym-policy and video-predict runners.
+``agents validate`` / ``bind`` / ``run`` / ``replay`` / ``export-rl``
+    BUILD.md P0-P3: Harbor-shaped eval contract, gym-policy and video-predict
+    runners, cartesian ``job.toml``, and a versioned RL projection dump.
 
 Written against ``argparse`` rather than a CLI framework.
 """
@@ -21,9 +22,10 @@ from or_audit.audit.trail import AuditTrail
 from or_audit.decision.rule import DecisionRule
 from or_audit.demo import run_demo
 from or_audit.domain.enums import ThresholdOwner
-from or_audit.errors import AuditChainError, TaskContractError
+from or_audit.errors import AuditChainError, ScoreContractError, TaskContractError
 from or_audit.eval.agent import AgentPackage
 from or_audit.eval.bind import assert_bind
+from or_audit.eval.enums import ProjectionId
 from or_audit.eval.loader import dataset_task_paths, load_agent, load_dataset, load_task
 from or_audit.eval.runner import builtin_random_agent, replay_job, run_job
 from or_audit.version import PACKAGE_VERSION
@@ -192,13 +194,37 @@ def _resolve_agent(spec: str) -> tuple[AgentPackage, Path | None]:
 
 
 def _run(args: argparse.Namespace) -> int:
-    """P1/P2: bind and run a task or dataset into a job directory."""
-    if bool(args.task) == bool(args.dataset):
-        print("run requires exactly one of -t/--task or -d/--dataset", file=sys.stderr)
+    """P1-P3: bind and run a task, dataset, or cartesian job.toml."""
+    n_sources = sum(bool(flag) for flag in (args.task, args.dataset, args.job))
+    if n_sources != 1:
+        print(
+            "run requires exactly one of -t/--task, -d/--dataset, or -c/--job",
+            file=sys.stderr,
+        )
+        return 2
+    if not args.job and not args.agent:
+        print("run requires -a/--agent unless -c/--job", file=sys.stderr)
+        return 2
+    if args.job and args.agent:
+        print(
+            "run -c/--job takes agents from the job file; omit -a/--agent",
+            file=sys.stderr,
+        )
         return 2
     try:
-        agent, agent_dir = _resolve_agent(args.agent)
         n = args.n if args.n else None
+        if args.job:
+            from or_audit.eval.cartesian import run_cartesian_job
+            from or_audit.eval.job_config import resolve_job
+
+            manifest = run_cartesian_job(
+                resolve_job(Path(args.job)),
+                out=Path(args.out),
+                n=n,
+            )
+            print(f"ran: {manifest.id} pairs={len(manifest.pairs)} head {manifest.head}")
+            return 0
+        agent, agent_dir = _resolve_agent(args.agent)
         if args.task:
             task_path = Path(args.task)
             task_dir = task_path if task_path.is_dir() else task_path.parent
@@ -227,25 +253,52 @@ def _run(args: argparse.Namespace) -> int:
             )
             print(f"ran: {result.task_id} n={result.n} head {result.head}")
         return 0
-    except TaskContractError as exc:
+    except (TaskContractError, ScoreContractError) as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return 1
 
 
 def _replay(args: argparse.Namespace) -> int:
-    """Re-run a job and require the stored head to match."""
+    """Re-run a job (or cartesian parent) and require the stored head to match."""
+    path = Path(args.path)
     try:
-        result = replay_job(Path(args.path), load_task=load_task, load_agent=load_agent)
-    except TaskContractError as exc:
+        if (path / "manifest.json").is_file():
+            from or_audit.eval.cartesian import replay_cartesian
+
+            manifest = replay_cartesian(path, load_task=load_task, load_agent=load_agent)
+            head = manifest.head
+            label = manifest.id
+        else:
+            result = replay_job(path, load_task=load_task, load_agent=load_agent)
+            head = result.head
+            label = result.task_id
+    except (TaskContractError, ScoreContractError) as exc:
         print(f"REPLAY FAILED: {exc}", file=sys.stderr)
         return 1
-    if args.expect_head and args.expect_head != result.head:
+    if args.expect_head and args.expect_head != head:
         print(
-            f"REPLAY FAILED: expected head {args.expect_head}, got {result.head}",
+            f"REPLAY FAILED: expected head {args.expect_head}, got {head}",
             file=sys.stderr,
         )
         return 1
-    print(f"replay matched: {result.task_id} head {result.head}")
+    print(f"replay matched: {label} head {head}")
+    return 0
+
+
+def _export_rl(args: argparse.Namespace) -> int:
+    """Dump a versioned projection jsonl. Closed enum; recomputed from the vector."""
+    from or_audit.eval.export_rl import export_rl
+
+    try:
+        n = export_rl(
+            Path(args.path),
+            projection_id=ProjectionId(args.projection),
+            out=Path(args.out),
+        )
+    except (TaskContractError, ScoreContractError) as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 1
+    print(f"exported: {n} episodes -> {args.out}")
     return 0
 
 
@@ -325,24 +378,39 @@ def build_parser() -> argparse.ArgumentParser:
     bind.add_argument("agent", help="agent directory or agent.toml")
     bind.set_defaults(func=_bind)
 
-    run = sub.add_parser("run", help="evaluate an agent on a task or dataset")
+    run = sub.add_parser("run", help="evaluate an agent on a task, dataset, or job.toml")
     run.add_argument("-t", "--task", help="task directory or task.toml")
     run.add_argument("-d", "--dataset", help="dataset directory or dataset.toml")
-    run.add_argument("-a", "--agent", required=True, help="agent directory, or 'random'")
+    run.add_argument("-c", "--job", help="job.toml cartesian product of agents x tasks")
+    run.add_argument("-a", "--agent", help="agent directory, or 'random' (required unless -c)")
     run.add_argument(
         "-n",
         "--n",
         type=int,
         default=0,
-        help="episodes (default: task n_eval_episodes)",
+        help="episodes (CLI > job.toml n > task n_eval_episodes)",
     )
     run.add_argument("--out", required=True, help="job output directory")
     run.set_defaults(func=_run)
 
     replay = sub.add_parser("replay", help="re-run a job and match its stored head")
-    replay.add_argument("path", help="job directory")
-    replay.add_argument("--expect-head", help="require this job head")
+    replay.add_argument("path", help="job directory or cartesian parent")
+    replay.add_argument("--expect-head", help="require this job or manifest head")
     replay.set_defaults(func=_replay)
+
+    export_rl = sub.add_parser(
+        "export-rl",
+        help="write a versioned projection jsonl from a job (not a leaderboard row)",
+    )
+    export_rl.add_argument("path", help="job directory or cartesian parent")
+    export_rl.add_argument(
+        "--projection",
+        required=True,
+        choices=[member.value for member in ProjectionId],
+        help="closed projection id; homemade floats are refused",
+    )
+    export_rl.add_argument("--out", required=True, help="jsonl output path")
+    export_rl.set_defaults(func=_export_rl)
 
     return parser
 
