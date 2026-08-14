@@ -41,6 +41,29 @@ from or_audit.metrics.icc import IccEstimate, icc_2_1
 #: Fraction of the panel's own agreement the scorer must reach.
 DEFAULT_RELATIVE_TARGET = 0.90
 
+#: Panel agreement below which the panel is not a usable reference at all.
+#:
+#: A purely relative target has a failure mode PLAN.md section 13 actually
+#: names when arguing against an absolute one: it "silently accepts a weak
+#: model when panel agreement is poor". Relative scaling alone makes that
+#: worse, not better -- degrade the panel far enough and the bar approaches
+#: zero, so a scorer uncorrelated with truth clears it. Review demonstrated
+#: exactly this by simulation.
+#:
+#: The resolution is that panel adequacy is a *precondition*, not a scaling
+#: factor. A panel that cannot agree with itself is not a low ceiling; it is
+#: not a ceiling. Below this value the figure is invalid and no scorer can
+#: pass on it, however it performs.
+DEFAULT_MIN_PANEL_ICC = 0.40
+
+#: Floor the requirement never drops below, whatever the panel does.
+#:
+#: Defence in depth behind the adequacy check. Deliberately modest: section 13
+#: rejects an absolute target precisely because a high one "demands superhuman
+#: consistency", so this sits low enough never to bind on a healthy panel and
+#: high enough that noise cannot clear it.
+DEFAULT_ABSOLUTE_FLOOR = 0.50
+
 
 class Endpoint(StrEnum):
     """Which endpoint an agreement figure describes."""
@@ -65,11 +88,23 @@ class AgreementFigure:
     expert_vs_expert: IccEstimate
     relative_target: float
     n_cases: int
+    absolute_floor: float = DEFAULT_ABSOLUTE_FLOOR
+    min_panel_icc: float = DEFAULT_MIN_PANEL_ICC
+
+    @property
+    def panel_is_adequate(self) -> bool:
+        """Whether the panel agrees with itself well enough to be a reference."""
+        return self.expert_vs_expert.value >= self.min_panel_icc
 
     @property
     def required(self) -> float:
-        """The value the scorer must reach on these cases."""
-        return self.relative_target * self.expert_vs_expert.value
+        """The value the scorer must reach on these cases.
+
+        Never below :attr:`absolute_floor`, so a degraded panel cannot lower
+        the bar toward zero. Meaningful only when :attr:`panel_is_adequate`;
+        an inadequate panel makes the whole figure invalid rather than easy.
+        """
+        return max(self.absolute_floor, self.relative_target * self.expert_vs_expert.value)
 
     @property
     def achieved(self) -> float:
@@ -78,8 +113,8 @@ class AgreementFigure:
 
     @property
     def passes(self) -> bool:
-        """Whether the scorer met the relative target."""
-        return self.achieved >= self.required
+        """Whether the scorer met the requirement on a usable panel."""
+        return self.panel_is_adequate and self.achieved >= self.required
 
     @property
     def is_stratified(self) -> bool:
@@ -89,11 +124,13 @@ class AgreementFigure:
     def describe(self) -> str:
         """One line suitable for a report, never a bare coefficient."""
         cohort = f"{self.band.value} only" if self.band else "MIXED BAND (secondary)"
+        panel = "" if self.panel_is_adequate else " PANEL INADEQUATE"
         return (
             f"{self.endpoint.value}: ICC(2,1)={self.achieved:.3f} vs panel "
             f"{self.expert_vs_expert.value:.3f} "
-            f"(target {self.relative_target:g}x = {self.required:.3f}), "
-            f"n={self.n_cases}, {cohort}"
+            f"(required {self.required:.3f} = max({self.absolute_floor:g}, "
+            f"{self.relative_target:g}x panel)), "
+            f"n={self.n_cases}, {cohort}{panel}"
         )
 
 
@@ -129,6 +166,8 @@ def agreement_figure(
     expert_panel: Sequence[npt.ArrayLike],
     band: SkillBand | None,
     relative_target: float = DEFAULT_RELATIVE_TARGET,
+    absolute_floor: float = DEFAULT_ABSOLUTE_FLOOR,
+    min_panel_icc: float = DEFAULT_MIN_PANEL_ICC,
 ) -> AgreementFigure:
     """Compute automated-versus-panel and panel-internal agreement together.
 
@@ -181,6 +220,8 @@ def agreement_figure(
         expert_vs_expert=expert_vs_expert,
         relative_target=relative_target,
         n_cases=int(automated_scores.size),
+        absolute_floor=absolute_floor,
+        min_panel_icc=min_panel_icc,
     )
 
 
@@ -191,6 +232,10 @@ class AgreementGate(BaseModel):
 
     version: str = "1"
     relative_target: Annotated[float, Field(gt=0.0, le=1.0)] = DEFAULT_RELATIVE_TARGET
+    #: Panel agreement below which no scorer can pass, however it performs.
+    min_panel_icc: Annotated[float, Field(gt=0.0, lt=1.0)] = DEFAULT_MIN_PANEL_ICC
+    #: Requirement floor, independent of the panel.
+    absolute_floor: Annotated[float, Field(gt=0.0, lt=1.0)] = DEFAULT_ABSOLUTE_FLOOR
     #: Cases required in the stratified cohort before the figure is reportable.
     #: A relative target computed on a handful of cases is noise.
     min_cases: Annotated[int, Field(ge=2)] = 30
@@ -228,6 +273,20 @@ class AgreementGate(BaseModel):
                     "the primary figure was computed on a mixed-band cohort; "
                     "between-group variance inflates it and credentialing needs "
                     "within-band discrimination, so a mixed figure is secondary only"
+                ),
+                primary=primary.describe(),
+                secondary=secondary,
+            )
+        if not primary.panel_is_adequate:
+            return AgreementGateResult(
+                passed=False,
+                reason=(
+                    f"the expert panel agreed with itself at only "
+                    f"{primary.expert_vs_expert.value:.3f}, below the "
+                    f"{primary.min_panel_icc:g} adequacy minimum; a panel that "
+                    f"cannot agree with itself is not a ceiling to measure "
+                    f"against, so no scorer can pass on these cases. Fix the "
+                    f"rubric or the raters, not the scorer."
                 ),
                 primary=primary.describe(),
                 secondary=secondary,

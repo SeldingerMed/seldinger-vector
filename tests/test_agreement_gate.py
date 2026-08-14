@@ -261,3 +261,118 @@ class TestVerdictCannotBeCollapsed:
             band=SkillBand.ATTENDING,
         )
         assert AgreementGate().evaluate({Endpoint.BINARY_PROFICIENCY: figure}).passed is True
+
+
+class TestPanelAdequacyIsAPrecondition:
+    """Regression: a purely relative target let a pure-noise scorer pass.
+
+    Review demonstrated it by simulation. Degrading the expert panel degraded
+    the requirement with it -- toward zero, and past zero into negative -- so a
+    scorer uncorrelated with truth cleared the bar at eight of twenty-five
+    noise levels in a single seed.
+
+    PLAN.md section 13 actually names this failure when arguing against an
+    absolute target: such a target "silently accepts a weak model when panel
+    agreement is poor". Relative scaling alone makes it worse. The resolution
+    is that panel adequacy is a precondition rather than a scaling factor: a
+    panel that cannot agree with itself is not a low ceiling, it is not a
+    ceiling.
+    """
+
+    def test_pure_noise_never_passes_at_any_panel_quality(self):
+        rng = np.random.default_rng(7)
+        passes = []
+        for noise in np.linspace(0.1, 5.0, 25):
+            truth = rng.normal(0.0, 1.0, 60)
+            panel = [truth + rng.normal(0.0, noise, 60) for _ in range(3)]
+            noise_scorer = rng.normal(0.5, 1.0, 60)
+            figure = agreement_figure(
+                endpoint=Endpoint.BINARY_PROFICIENCY,
+                automated=noise_scorer,
+                expert_panel=panel,
+                band=SkillBand.ATTENDING,
+            )
+            if AgreementGate().evaluate({Endpoint.BINARY_PROFICIENCY: figure}).passed:
+                passes.append((round(float(noise), 2), round(figure.achieved, 3)))
+        assert not passes, f"a scorer uncorrelated with truth passed at {passes}"
+
+    def test_requirement_is_never_negative(self):
+        """A negative bar certifies worse-than-chance agreement."""
+        rng = np.random.default_rng(11)
+        for _ in range(50):
+            figure = agreement_figure(
+                endpoint=Endpoint.BINARY_PROFICIENCY,
+                automated=rng.normal(0.0, 1.0, 60),
+                expert_panel=[rng.normal(0.0, 1.0, 60) for _ in range(3)],
+                band=SkillBand.ATTENDING,
+            )
+            assert figure.required >= 0.0
+
+    def test_an_inadequate_panel_blocks_the_gate_with_a_pointed_reason(self):
+        rng = np.random.default_rng(3)
+        truth = rng.normal(0.0, 1.0, 60)
+        panel = [truth + rng.normal(0.0, 4.0, 60) for _ in range(3)]
+        figure = agreement_figure(
+            endpoint=Endpoint.BINARY_PROFICIENCY,
+            automated=truth,
+            expert_panel=panel,
+            band=SkillBand.ATTENDING,
+        )
+        assert not figure.panel_is_adequate
+        verdict = AgreementGate().evaluate({Endpoint.BINARY_PROFICIENCY: figure})
+        assert not verdict.passed
+        assert "not a ceiling to measure against" in verdict.reason
+        assert "Fix the rubric or the raters, not the scorer" in verdict.reason
+
+    def test_an_inadequate_panel_is_flagged_in_the_description(self):
+        rng = np.random.default_rng(5)
+        truth = rng.normal(0.0, 1.0, 60)
+        panel = [truth + rng.normal(0.0, 4.0, 60) for _ in range(3)]
+        figure = agreement_figure(
+            endpoint=Endpoint.BINARY_PROFICIENCY,
+            automated=truth,
+            expert_panel=panel,
+            band=SkillBand.ATTENDING,
+        )
+        assert "PANEL INADEQUATE" in figure.describe()
+
+    def test_a_perfect_scorer_cannot_pass_on_an_inadequate_panel(self):
+        """Not even a scorer that matches truth exactly: there is no reference."""
+        rng = np.random.default_rng(13)
+        truth = rng.normal(0.0, 1.0, 60)
+        panel = [truth + rng.normal(0.0, 5.0, 60) for _ in range(3)]
+        figure = agreement_figure(
+            endpoint=Endpoint.BINARY_PROFICIENCY,
+            automated=truth,
+            expert_panel=panel,
+            band=SkillBand.ATTENDING,
+        )
+        assert not figure.passes
+
+    def test_a_healthy_panel_still_lets_a_good_scorer_pass(self):
+        """The floor must not bind on a panel that agrees with itself."""
+        rng = np.random.default_rng(17)
+        truth = rng.normal(0.0, 1.0, 60)
+        panel = [truth + rng.normal(0.0, 0.15, 60) for _ in range(3)]
+        figure = agreement_figure(
+            endpoint=Endpoint.BINARY_PROFICIENCY,
+            automated=truth + rng.normal(0.0, 0.15, 60),
+            expert_panel=panel,
+            band=SkillBand.ATTENDING,
+        )
+        assert figure.panel_is_adequate
+        assert AgreementGate().evaluate({Endpoint.BINARY_PROFICIENCY: figure}).passed
+
+    def test_the_relative_target_still_binds_above_the_absolute_floor(self):
+        """The floor is defence in depth, not a replacement for the ratio."""
+        rng = np.random.default_rng(19)
+        truth = rng.normal(0.0, 1.0, 60)
+        panel = [truth + rng.normal(0.0, 0.1, 60) for _ in range(3)]
+        figure = agreement_figure(
+            endpoint=Endpoint.BINARY_PROFICIENCY,
+            automated=truth,
+            expert_panel=panel,
+            band=SkillBand.ATTENDING,
+        )
+        assert figure.required > figure.absolute_floor
+        assert figure.required == pytest.approx(0.9 * figure.expert_vs_expert.value)

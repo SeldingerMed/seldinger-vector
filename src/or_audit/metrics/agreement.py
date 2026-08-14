@@ -188,7 +188,10 @@ def sensitivity_at_specificity(
         raise ScoreContractError(msg)
 
     # Candidate thresholds: every observed score, plus one above the maximum so
-    # the "classify nothing as positive" point is reachable.
+    # the "classify nothing as positive" point is reachable. That sentinel is
+    # what a detector unable to meet the floor falls back to, and it is why the
+    # returned threshold can exceed every score in the cohort -- a caller
+    # reusing the threshold downstream should expect that.
     candidates = np.unique(np.concatenate([score_array, [score_array.max() + 1.0]]))
     best: OperatingPoint | None = None
     for threshold in candidates:
