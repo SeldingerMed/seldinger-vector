@@ -37,6 +37,9 @@ plan and should not be relaxed without amending it.
 | Platform is data, never a branch | `domain.RobotPlatform` | Vendor-specific behaviour belongs in ingestion adapters only. |
 | Gates cannot collapse to a scalar | `scoring.SafetyGateSet` | `float()`, `int()` and `bool()` raise. Hard gates never average into soft scores (§7.1). |
 | A gate that cannot see cannot clear | `GateStatus.NOT_ASSESSABLE` | Missing or low-confidence evidence never reads as a pass. |
+| ICC form is named, averaging refused | `metrics.icc_2_1` | An unqualified ICC is a family of numbers. Average-measures raises (§13). |
+| The agreement target is relative | `metrics.AgreementGate` | The panel is the ceiling; an absolute target either demands superhuman consistency or accepts noise. |
+| Binary proficiency is primary | `SkillScore` | GEARS alone is not a result (§13). |
 
 ## Layout
 
@@ -48,7 +51,8 @@ src/or_audit/
   ingest/    manifests into episodes; kinematics/video alignment
   deid/      detectors, policy, redaction plans, attestation
   perception/ observation vocabulary and backend protocol
-  scoring/   deterministic hard safety gates
+  scoring/   hard safety gates; binary proficiency and GEARS
+  metrics/   ICC(2,1), Fleiss kappa, the section 13 agreement gate
 docs/PLAN.md the product plan this implements
 ```
 
