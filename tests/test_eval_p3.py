@@ -155,6 +155,7 @@ def test_cartesian_random_gym_export_unsafe_is_zero(tmp_path: Path) -> None:
     recon = reconstitute_trial_vector(
         trial0,
         task=load_task(task_dir),
+        task_dir=task_dir,
         agent_identity=result.agent_identity,
         seed=0,
         safety_max_pen=0.3,
@@ -273,6 +274,7 @@ def test_reconstitute_refuses_unknown_trajectory(tmp_path: Path) -> None:
         reconstitute_trial_vector(
             trial,
             task=load_task(VIDEO_TASK),
+            task_dir=VIDEO_TASK,
             agent_identity="example/video-predictor@0+none",
             seed=0,
         )

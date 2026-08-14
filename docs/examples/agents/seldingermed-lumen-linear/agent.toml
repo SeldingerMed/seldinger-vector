@@ -1,0 +1,8 @@
+format_version = "1"
+id = "seldingermed/lumen-linear"
+agent_version = "0"
+port = "gym-policy"
+kind = "policy"
+weights_pin = "a000e3af8b0e38db910907f794c962d1277605753c04b75d1aa4cf8b88c58ba0"
+weights_path = "weights.json"
+entrypoint = "policy.py:load_policy"

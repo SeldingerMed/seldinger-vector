@@ -7,7 +7,7 @@
 This document exists because `PLAN.md` and the founding intent are not the same product.
 
 - `PLAN.md` is a **credentialing / QA attestation** thesis: sell a vendor-neutral score of *named surgeons* to hospitals and robot-platform challengers, under a legal wrapper a risk officer can hold.
-- The founding intent, restated against this repo, is an **eval environment and assessment layer for technical AI in medicine** — physical AI, image-conditioned decisions, world models, robotics — the thing Harbor and Prime Intellect are for coding agents. Harbor does not enumerate programming languages in the kernel; we do not enumerate procedures. The sandbox binds `org/name` agents (`seldingermed/cathmodel`, a stranger’s CABG next-step VLM) to submitted tasks by **port**, not by specialty.
+- The founding intent, restated against this repo, is an **eval environment and assessment layer for technical AI in medicine** — physical AI, image-conditioned decisions, world models, robotics — the thing Harbor and Prime Intellect are for coding agents. Harbor does not enumerate programming languages in the kernel; we do not enumerate procedures. The sandbox binds `org/name` agents (`seldingermed/lumen-linear`, a stranger’s CABG next-step VLM) to submitted tasks by **port**, not by specialty.
 
 **Decision (2026-08-14): Future B is the wedge.** Build Harbor-for-medicine — niche eval / RL infrastructure for procedural medical AI and world models. Named-human credentialing (`PLAN.md`) stays a gated mode on the same rails and does not block this plan.
 
@@ -23,7 +23,7 @@ Nothing here clears those gates. Nothing here is clinical validation, regulatory
 
 Three Seldinger surfaces already cover the Harbor stack, under different names, in different repos, with no common task contract.
 
-### 1.1 This repo (`or-audit` v0.1.0a0)
+### 1.1 This repo (`or-audit` v0.2.0a0)
 
 Engineering scaffolding for the pipeline in `PLAN.md` §7.1. What is load-bearing in code, not comments:
 

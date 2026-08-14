@@ -6,8 +6,10 @@ world pin; Newton is not a default dependency.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
-from typing import Any, Protocol
+from importlib.metadata import PackageNotFoundError, distribution
+from typing import Any, Protocol, cast
 
 import numpy as np
 
@@ -38,14 +40,23 @@ def make_gym(task: TaskSpec) -> GymEnv:
     """
     kind = task.environment.kind
     if kind is WorldKind.LUMEN_GYM:
-        return _make_lumen(task.environment.gym_id)
+        return _make_lumen(
+            task.environment.gym_id,
+            world_pin=task.environment.world_pin,
+            parameters=task.environment.parameters,
+        )
     if kind is WorldKind.GYM:
-        return _make_gymnasium(task.environment.gym_id)
+        return _make_gymnasium(task.environment.gym_id, parameters=task.environment.parameters)
     msg = f"task {task.id} world kind {kind.value} is not a gym-policy world"
     raise TaskContractError(msg)
 
 
-def _make_lumen(gym_id: str) -> GymEnv:
+def _make_lumen(
+    gym_id: str,
+    *,
+    world_pin: str,
+    parameters: dict[str, bool | int | float | str],
+) -> GymEnv:
     try:
         from lumen.envs.registration import LUMEN_ENVS, register_gym_envs
     except ImportError as exc:
@@ -54,6 +65,7 @@ def _make_lumen(gym_id: str) -> GymEnv:
             "run gym-policy evals (BUILD.md P1). Default CI does not import them."
         )
         raise TaskContractError(msg) from exc
+    _require_lumen_pin(world_pin)
     if gym_id not in LUMEN_ENVS:
         known = ", ".join(sorted(LUMEN_ENVS))
         msg = f"unknown Lumen gym_id {gym_id!r}; known: {known}"
@@ -62,13 +74,31 @@ def _make_lumen(gym_id: str) -> GymEnv:
         import gymnasium
 
         register_gym_envs()
-        env = gymnasium.make(gym_id)
+        kwargs: dict[str, Any] = dict(parameters)
+        env = cast(GymEnv, gymnasium.make(gym_id, **kwargs))
     except ImportError:
-        env = LUMEN_ENVS[gym_id]()
-    return env  # type: ignore[no-any-return]
+        factory: Callable[..., Any] = LUMEN_ENVS[gym_id]
+        env = cast(GymEnv, factory(**parameters))
+    return env
 
 
-def _make_gymnasium(gym_id: str) -> GymEnv:
+def _require_lumen_pin(expected: str) -> None:
+    """Require the installed VCS package to match the task's immutable world pin."""
+    try:
+        metadata = distribution("seldinger-lumen").read_text("direct_url.json")
+    except PackageNotFoundError as exc:
+        raise TaskContractError("seldinger-lumen distribution metadata is missing") from exc
+    if not metadata:
+        raise TaskContractError("seldinger-lumen is not installed from a pinned VCS revision")
+    try:
+        actual = json.loads(metadata)["vcs_info"]["commit_id"]
+    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise TaskContractError("seldinger-lumen direct_url.json has no VCS commit") from exc
+    if actual != expected:
+        raise TaskContractError(f"Lumen pin mismatch: task requires {expected}, installed {actual}")
+
+
+def _make_gymnasium(gym_id: str, *, parameters: dict[str, bool | int | float | str]) -> GymEnv:
     try:
         import gymnasium
     except ImportError as exc:
@@ -77,7 +107,8 @@ def _make_gymnasium(gym_id: str) -> GymEnv:
             f"pip install 'or-audit[lumen]' (gymnasium only) or the env's extra"
         )
         raise TaskContractError(msg) from exc
-    return gymnasium.make(gym_id)  # type: ignore[no-any-return]
+    kwargs: dict[str, Any] = dict(parameters)
+    return cast(GymEnv, gymnasium.make(gym_id, **kwargs))
 
 
 def sample_action(env: GymEnv, *, seed: int, step: int) -> Any:
@@ -115,7 +146,7 @@ def run_gym_episode(
     env: GymEnv,
     *,
     seed: int,
-    action_fn: Callable[[GymEnv, int], Any],
+    action_fn: Callable[[GymEnv, Any, int], Any],
     max_steps: int = 10_000,
 ) -> tuple[dict[str, Any], tuple[dict[str, Any], ...]]:
     """Roll out one episode. Returns final info and the trajectory."""
@@ -123,7 +154,7 @@ def run_gym_episode(
     steps: list[dict[str, Any]] = []
     info: Any = {}
     for step_i in range(max_steps):
-        action = action_fn(env, step_i)
+        action = action_fn(env, obs, step_i)
         obs, reward, terminated, truncated, info = env.step(action)
         steps.append(
             {

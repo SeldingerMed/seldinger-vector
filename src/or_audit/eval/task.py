@@ -99,8 +99,11 @@ class WorldSpec(_Frozen):
     kind: WorldKind
     gym_id: str = ""
     world_pin: str = ""
+    parameters: dict[str, bool | int | float | str] = Field(default_factory=dict)
     n_eval_episodes: Annotated[int, Field(ge=1, le=10_000)] = 30
     seed_policy: str = "deterministic-eval-30"
+    #: Relative to the task directory. Inputs visible to a video-predict agent.
+    inputs_path: str = ""
     #: Relative to the task directory. video-predict labels the task author brought.
     labels_path: str = ""
     #: Relative to the task directory. AngioStress-shaped contract JSON.
@@ -161,6 +164,7 @@ class VerifierSpec(_Frozen):
     headline: Slug
     gates: tuple[GateSpec, ...] = ()
     metrics: tuple[MetricSpec, ...] = ()
+    entrypoint: str = ""
 
     @model_validator(mode="after")
     def _headline_is_a_metric(self) -> Self:
@@ -302,6 +306,18 @@ class TaskSpec(_Frozen):
             msg = (
                 f"task {self.id} has no world_pin; a published row must pin the "
                 f"sim so it can replay (BUILD.md §1.3)"
+            )
+            raise TaskContractError(msg)
+        if not self.verifier.entrypoint:
+            msg = (
+                f"task {self.id} has no verifier entrypoint; runnable tasks must "
+                f"bring executable vector scoring"
+            )
+            raise TaskContractError(msg)
+        if self.port.id is PortId.VIDEO_PREDICT and not self.environment.inputs_path:
+            msg = (
+                f"task {self.id} is video-predict but has no inputs_path; "
+                f"agents must never receive labels as inputs"
             )
             raise TaskContractError(msg)
         if self.port.id is PortId.VIDEO_PREDICT and not self.environment.labels_path:

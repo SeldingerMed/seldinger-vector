@@ -1,6 +1,5 @@
 {
   "items": [
-    {"id": "dias-s40", "dice": 0.71, "cldice": 0.64},
-    {"id": "dias-s41", "dice": 0.55, "cldice": 0.48}
+    {"id": "angiostress-v0.1-release-audit", "release_audit_passed": true}
   ]
 }

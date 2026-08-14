@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Annotated, Any, Self
 
@@ -12,6 +13,7 @@ from or_audit.audit.canonical import digest
 from or_audit.errors import TaskContractError
 from or_audit.eval.agent import AgentPackage
 from or_audit.eval.enums import WorldKind
+from or_audit.eval.integrity import tree_digest
 from or_audit.eval.task import TaskSpec
 from or_audit.eval.vector import TrialVector
 
@@ -36,6 +38,8 @@ class JobResult(BaseModel):
     task_version: str
     agent_identity: str
     world_pin: str
+    task_digest: str
+    agent_digest: str
     n: Annotated[int, Field(ge=1)]
     headline: str
     trials: tuple[TrialRecord, ...]
@@ -104,6 +108,8 @@ def assemble_job_result(
     task: TaskSpec,
     agent: AgentPackage,
     trials: tuple[TrialRecord, ...],
+    task_digest: str,
+    agent_digest: str,
     claim_footer: str = "",
 ) -> JobResult:
     """Build a publishable job result and stamp its head."""
@@ -127,6 +133,8 @@ def assemble_job_result(
         task_version=task.task_version,
         agent_identity=agent_identity(agent),
         world_pin=task.environment.world_pin,
+        task_digest=task_digest,
+        agent_digest=agent_digest,
         n=len(trials),
         headline=task.verifier.headline,
         trials=trials,
@@ -139,9 +147,70 @@ def assemble_job_result(
     return result.model_copy(update={"head": compute_head(result)})
 
 
-def write_job(out: Path, *, config: dict[str, Any], result: JobResult) -> None:
+def resolve_bundle_path(job_dir: Path, raw: object, *, label: str) -> Path:
+    """Resolve a relative bundle path without allowing traversal or symlink escape."""
+    root = job_dir.resolve()
+    path = Path(str(raw))
+    if path.is_absolute():
+        raise TaskContractError(f"bundle {label} path must be relative: {path}")
+    candidate = (root / path).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise TaskContractError(f"bundle {label} path escapes job directory: {path}") from exc
+    return candidate
+
+
+def _copy_package(source: Path, target: Path) -> None:
+    if source.resolve() == target.resolve():
+        return
+    target.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(
+        source,
+        target,
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            "__pycache__",
+            ".pytest_cache",
+            ".ruff_cache",
+            ".mypy_cache",
+            "*.pyc",
+            "*.pyo",
+        ),
+    )
+
+
+def write_job(
+    out: Path,
+    *,
+    config: dict[str, Any],
+    result: JobResult,
+    task_dir: Path,
+    agent_dir: Path | None,
+) -> None:
     """Write a Harbor-shaped job directory."""
     out.mkdir(parents=True, exist_ok=True)
+    bundle = out / "bundle"
+    task_target = bundle / "task"
+    _copy_package(task_dir, task_target)
+    if tree_digest(task_target) != result.task_digest:
+        raise TaskContractError("copied task package digest does not match result")
+    if agent_dir is not None:
+        agent_target = bundle / "agent"
+        _copy_package(agent_dir, agent_target)
+        if tree_digest(agent_target) != result.agent_digest:
+            raise TaskContractError("copied agent package digest does not match result")
+    manifest = {
+        "format_version": "1",
+        "task": {"path": "bundle/task", "digest": result.task_digest},
+        "agent": (
+            {"path": "bundle/agent", "digest": result.agent_digest}
+            if agent_dir is not None
+            else {"path": None, "digest": result.agent_digest}
+        ),
+    }
+    (out / "bundle.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     (out / "config.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     (out / "result.json").write_text(
         json.dumps(result.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8"
@@ -159,6 +228,9 @@ def write_job(out: Path, *, config: dict[str, Any], result: JobResult) -> None:
             (trial_dir / "projection.json").write_text(
                 json.dumps({"projection": trial.projection}) + "\n", encoding="utf-8"
             )
+    from or_audit.eval.scorecard import write_scorecards
+
+    write_scorecards(out, result)
 
 
 def read_job_result(out: Path) -> JobResult:

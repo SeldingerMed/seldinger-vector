@@ -9,6 +9,7 @@ from typing import Any
 from or_audit.errors import TaskContractError
 from or_audit.eval.agent import AgentPackage
 from or_audit.eval.dataset import DatasetSpec
+from or_audit.eval.integrity import file_sha256, package_file
 from or_audit.eval.task import TaskSpec
 
 
@@ -115,7 +116,17 @@ def load_agent(path: Path | str) -> AgentPackage:
     root = _agent_root(Path(path))
     data = _read_toml(root / "agent.toml")
     try:
-        return AgentPackage.model_validate(data)
+        agent = AgentPackage.model_validate(data)
+        if agent.weights_path:
+            weights = package_file(root, agent.weights_path, label="agent weights")
+            actual = file_sha256(weights)
+            if actual != agent.weights_pin:
+                msg = (
+                    f"agent {agent.id} weights digest mismatch: "
+                    f"declared {agent.weights_pin}, actual {actual}"
+                )
+                raise TaskContractError(msg)
+        return agent
     except TaskContractError:
         raise
     except Exception as exc:

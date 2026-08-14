@@ -429,6 +429,14 @@ wheels = [
 ]
 
 [[package]]
+name = "newton"
+version = "1.4.0.dev0"
+source = { git = "https://github.com/newton-physics/newton?rev=6dfe7303d9ca50f7505cac31bee9885c813d89d7#6dfe7303d9ca50f7505cac31bee9885c813d89d7" }
+dependencies = [
+    { name = "warp-lang" },
+]
+
+[[package]]
 name = "numpy"
 version = "2.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -589,7 +597,7 @@ wheels = [
 
 [[package]]
 name = "or-audit"
-version = "0.1.0a0"
+version = "0.2.0a0"
 source = { editable = "." }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -605,18 +613,18 @@ dev = [
     { name = "ruff" },
 ]
 lumen = [
-    { name = "gymnasium" },
+    { name = "seldinger-lumen", extra = ["gym", "solver"] },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "gymnasium", marker = "extra == 'lumen'", specifier = ">=0.29" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pydantic", specifier = ">=2.7,<3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
+    { name = "seldinger-lumen", extras = ["solver", "gym"], marker = "extra == 'lumen'", git = "https://github.com/SeldingerMed/seldinger-lumen.git?rev=3c6bb39ecc916c73e81131b94353ad8deee62bd4" },
 ]
 provides-extras = ["dev", "lumen"]
 
@@ -829,6 +837,24 @@ wheels = [
 ]
 
 [[package]]
+name = "seldinger-lumen"
+version = "0.0.0"
+source = { git = "https://github.com/SeldingerMed/seldinger-lumen.git?rev=3c6bb39ecc916c73e81131b94353ad8deee62bd4#3c6bb39ecc916c73e81131b94353ad8deee62bd4" }
+dependencies = [
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+
+[package.optional-dependencies]
+gym = [
+    { name = "gymnasium" },
+]
+solver = [
+    { name = "newton" },
+    { name = "warp-lang" },
+]
+
+[[package]]
 name = "tomli"
 version = "2.4.1"
 source = { registry = "https://pypi.org/simple" }
@@ -901,4 +927,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a3/26/b09b8010994eccc3c09092e6b34058f36a460eea2d4c3e8b910c695975a0/typing_inspection-0.4.4.tar.gz", hash = "sha256:547274fa6b0a561ccf549cc9524b999a578e737d015d8709d021f9d0d13bea47", size = 76928, upload-time = "2026-08-12T12:37:25.997Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/67/81/4add07e5172b7ac40d8ed5ff580409a7801a4fe26d529bdd915401dabfbe/typing_inspection-0.4.4-py3-none-any.whl", hash = "sha256:65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147", size = 14750, upload-time = "2026-08-12T12:37:24.648Z" },
+]
+
+[[package]]
+name = "warp-lang"
+version = "1.15.0"
+source = { registry = "https://pypi.nvidia.com/" }
+dependencies = [
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+wheels = [
+    { url = "https://pypi.nvidia.com/warp-lang/warp_lang-1.15.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:ee06e2e76bff84088a09e64315e71ed0e55e94c936ec664d7b05ebd56f66a363" },
+    { url = "https://pypi.nvidia.com/warp-lang/warp_lang-1.15.0-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:95c169f28bd7d6c78ac4ad62e2df1e61a096033748f757157fa4551aed80d010" },
+    { url = "https://pypi.nvidia.com/warp-lang/warp_lang-1.15.0-py3-none-manylinux_2_34_aarch64.whl", hash = "sha256:3c0711b39ad98ff924d29654b028ec4eaa02330e207ae3efc72445e9cde05b34" },
+    { url = "https://pypi.nvidia.com/warp-lang/warp_lang-1.15.0-py3-none-win_amd64.whl", hash = "sha256:06ef42c3ce522749268056653ea253645eb4a96ca164af74ae5113f0d55a6970" },
 ]

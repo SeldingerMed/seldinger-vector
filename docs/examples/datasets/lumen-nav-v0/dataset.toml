@@ -1,5 +1,5 @@
 format_version = "1"
-id = "lumen-nav-v0"
+id = "seldingermed/lumen-nav"
 dataset_version = "0"
 headline = "safe_success"
 phi_class = "procedural"

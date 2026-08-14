@@ -3,15 +3,15 @@
 Vector verifier and attestation kernel for procedural skill, safety, and
 technical-AI evaluation.
 
-> **Status: v0.1 alpha.** Engineering scaffolding for a Harbor analog:
-> evaluate procedural medical agents in physics and image environments, with
-> a vector verifier that cannot hide injury inside a reach metric. Evals are
-> infinite: we do not enumerate procedures. We bind `org/name` agents to
-> tasks by **port** (`gym-policy` or `video-predict`) and run them.
+> **Status: v0.2 alpha.** Runnable Harbor analog for procedural-medical model
+> evaluation: immutable `org/name@version` packages, real physics and frozen-model
+> execution, portable replay, and vector scorecards that cannot hide injury inside
+> a reach metric. Evals are infinite: procedures remain task submissions, not kernel
+> enums. Agents bind to tasks through two ports: `gym-policy` and `video-predict`.
 >
-> - **Wedge (this is the product):** [`docs/BUILD.md`](docs/BUILD.md) — Harbor
->   analog. Same verb for `seldingermed/cathmodel` and an uploaded CABG
->   next-step VLM. First *runnable* ship is Lumen `safe_success`.
+> - **Wedge (this is the product):** [`docs/BUILD.md`](docs/BUILD.md) — independent,
+>   reproducible evaluation. The public registry is
+>   [`SeldingerMed/seldinger-tasks`](https://github.com/SeldingerMed/seldinger-tasks).
 > - **Gated mode:** [`docs/PLAN.md`](docs/PLAN.md) — named-surgeon
 >   credentialing. Phase 0 is **not** cleared and does **not** block the wedge.
 > - **Context:** [`docs/ASSESSMENT.md`](docs/ASSESSMENT.md) — straw-man /
@@ -32,7 +32,7 @@ The product is the Harbor-shaped eval harness in `BUILD.md`: a sandbox that
 services submitted `(dataset, agent)` pairs. Who the subject is (model vs
 surgeon) is a mode. Which procedure is **not** a kernel type — it is whatever
 task someone published. `or-audit bind` is the first Harbor verb that decides
-whether `seldingermed/cathmodel` and `acme/cabg-vlm` can even be scored on a
+whether `seldingermed/lumen-linear` and `acme/cabg-vlm` can even be scored on a
 given task.
 
 The thesis that survives both readings is **not** "we can score robotic
@@ -99,9 +99,9 @@ uv run mypy                # types
 
 uv run or-audit tasks validate docs/examples/tasks/lumen-nav-safe
 uv run or-audit tasks validate docs/examples/tasks/video-nextstep
-uv run or-audit agents validate docs/examples/agents/seldingermed-cathmodel
+uv run or-audit agents validate docs/examples/agents/seldingermed-lumen-linear
 uv run or-audit bind docs/examples/tasks/lumen-nav-safe \
-                     docs/examples/agents/seldingermed-cathmodel
+                     docs/examples/agents/seldingermed-lumen-linear
 uv run or-audit datasets validate docs/examples/datasets/lumen-nav-v0
 uv run or-audit run -t docs/examples/tasks/video-nextstep \
     -a docs/examples/agents/example-video-predictor --out /tmp/or-audit-video
@@ -111,11 +111,25 @@ uv run or-audit run -c docs/examples/jobs/lumen-nav-random -n 2 \
     --out /tmp/or-audit-job
 uv run or-audit export-rl /tmp/or-audit-job --projection gated_reach_v0 \
     --out /tmp/rollouts.jsonl
+
+# P4 public packages and static vector leaderboard
+uv run or-audit datasets list
+uv run or-audit agents list
+uv run or-audit run -d seldingermed/lumen-nav@0 \
+    -a seldingermed/lumen-linear@0 -n 30 --out /tmp/or-audit-lumen
+uv run or-audit replay /tmp/or-audit-lumen/lumen-nav-safe
+uv run or-audit leaderboard /tmp/or-audit-lumen /tmp/or-audit-video \
+    --out /tmp/or-audit-site
 ```
 
-`run -c` is the cartesian product of agents × tasks in `job.toml`. `export-rl` writes a versioned projection jsonl for RL; the leaderboard still reads the vector. Homemade projection ids are refused. The in-tree `lumen-nav-safe` task is valid but unpinned — set `world_pin` (tests inject a factory) before a live gym run.
+`run -c` is the cartesian product of agents × tasks in `job.toml`. `export-rl`
+writes a closed, versioned projection for training only; scorecards and leaderboards
+keep the vector. Job bundles contain the exact task and agent packages with content
+digests, so replay does not depend on the source checkout.
 
-P1 gym-policy against live Lumen needs `world_pin` set and seldinger-lumen installed; `or-audit[lumen]` only adds gymnasium. Default tests inject a factory so Newton is not a CI dependency.
+Live Lumen uses the task's pinned commit and requires the `lumen` extra. The public
+AngioStress package runs its pinned full release audit and downloads roughly 7 GB of
+derived public artifacts on first use. Neither row is clinical-validation evidence.
 
 CI runs lint, format check, mypy, and the test matrix on 3.11–3.13 with a
 coverage floor. All must pass before merge.

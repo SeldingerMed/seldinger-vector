@@ -1,6 +1,6 @@
 [project]
 name = "or-audit"
-version = "0.1.0a0"
+version = "0.2.0a0"
 description = "Eval harness for procedural medical AI (Harbor analog): vector verifier, tasks, datasets"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,12 +22,15 @@ dev = [
     "mypy>=1.11",
 ]
 lumen = [
-    "gymnasium>=0.29",
+    "seldinger-lumen[solver,gym] @ git+https://github.com/SeldingerMed/seldinger-lumen.git@3c6bb39ecc916c73e81131b94353ad8deee62bd4",
 ]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/or_audit"]

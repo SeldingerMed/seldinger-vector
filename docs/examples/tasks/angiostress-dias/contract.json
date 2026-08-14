@@ -1,9 +1,17 @@
 {
   "schema_version": 1,
-  "benchmark_id": "angiostress-v0.1-seed",
-  "claim_boundary": "This contract defines a real-data-first benchmark surface and validates source/result availability. It is not a final construct-validity estimate, clinical validation, or model-improvement claim.",
+  "benchmark_id": "angiostress-v0.1-real-data",
+  "source_pin": "d386bcc2f5bc534d18e9a866340adfc4f51e6463",
+  "claim_boundary": "AngioStress v0.1 is a benchmark artifact and measurement package. The public package exposes real DIAS and CathAction evaluation surfaces, frozen-model metrics, manifests, and derived prediction artifacts. It is not clinical validation, model improvement, or proof of synthetic-to-real transfer.",
   "metric_schema": {
-    "required_metrics": ["dice", "cldice", "finite_metric_check"],
-    "primary_validation_metric": "contract_validation_passed"
+    "required_metrics": [
+      "release_audit_passed",
+      "dias_prediction_count",
+      "cathaction_prediction_count",
+      "sam_vit_b_mean_dice",
+      "sam_vit_l_mean_dice",
+      "medsam_vit_b_mean_dice"
+    ],
+    "primary_validation_metric": "release_audit_passed"
   }
 }

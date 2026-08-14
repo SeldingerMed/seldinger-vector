@@ -9,7 +9,7 @@ Harbor’s homepage is one sentence: *evaluate agents in sandboxed environments.
 
 > Evaluate medical procedural agents — policies, frozen perception models, VLMs, world models — in physics and image environments, and score them with a vector verifier that cannot hide injury inside a reach metric.
 
-**The evals are infinite. We do not enumerate them.** Harbor does not have a kernel enum for Python vs Rust vs Go. It runs whatever Dockerfile + tests a task author submitted. Same here: we cannot heuristically define CABG next-step, a cath policy, and everything in between. We define a **port** (how the model talks), a **task format** (what the author must bring), and a runner that services `acme/cabg-vlm` the same way it services `seldingermed/cathmodel`.
+**The evals are infinite. We do not enumerate them.** Harbor does not have a kernel enum for Python vs Rust vs Go. It runs whatever Dockerfile + tests a task author submitted. Same here: we cannot heuristically define CABG next-step, a cath policy, and everything in between. We define a **port** (how the model talks), a **task format** (what the author must bring), and a runner that services `acme/cabg-vlm` the same way it services `seldingermed/lumen-linear`.
 
 Lumen is the first *seed world* so the sandbox is runnable. It is not the catalog of medicine.
 
@@ -50,11 +50,11 @@ A new procedure is a published dataset on an existing port. It is not a new enum
 **Service (same verb):**
 
 ```bash
-or-audit run -d seldingermed/lumen-nav@0  -a seldingermed/cathmodel
+or-audit run -d seldingermed/lumen-nav@0  -a seldingermed/lumen-linear@0
 or-audit run -d acme/cabg-nextstep@0      -a acme/cabg-vlm
 ```
 
-`seldingermed/cathmodel` is a `gym-policy` agent. `acme/cabg-vlm` is a `video-predict` agent (next-step / outcome on clips). If someone points the VLM at a gym task, **bind refuses**. We do not invent a CABG adapter to paper over a port mismatch. The kernel does not know CABG.
+`seldingermed/lumen-linear` is a `gym-policy` baseline. `acme/cabg-vlm` is a `video-predict` agent (next-step / outcome on clips). If someone points the VLM at a gym task, **bind refuses**. We do not invent a CABG adapter to paper over a port mismatch. The kernel does not know CABG.
 
 **Who brings the oracle?** The task author. Labels, a physics `info` dict, or a contract JSON. If they did not bring labels, we cannot score a CABG model — we do not hallucinate anatomy heuristics. That is the honest limit of a sandbox. It is also why this scales: we run and check shape; we do not maintain a medical ontology of every next-step vocabulary.
 
@@ -64,7 +64,7 @@ Seed fixtures so both ports exist in-tree (not a catalog of medicine):
 
 - `docs/examples/tasks/lumen-nav-safe` — `gym-policy` (Lumen, first runnable in P1)
 - `docs/examples/tasks/video-nextstep` — `video-predict` (generic next-step / outcome; procedure is the author’s)
-- `docs/examples/agents/seldingermed-cathmodel` — `org/name` on `gym-policy`
+- `docs/examples/agents/seldingermed-lumen-linear` — executable `org/name` baseline on `gym-policy`
 - `docs/examples/agents/example-video-predictor` — `org/name` on `video-predict`
 
 Open surgery as a distinct haptic/OR-theatre problem is out of scope for v1 (image-guided start). Knowledge-work clinical evals (Doctronic-class) stay out.
@@ -137,7 +137,7 @@ Build *on* these. The missing product is the Harbor glue plus the first publishe
                     └──────────────────────┬───────────────────────────┘
                                            │ tasks
 ┌─ agent org/name ────┐                    ▼
-│ seldingermed/cathmodel │  ┌──────────────────────────────┐
+│ seldingermed/lumen-linear │  ┌──────────────────────────────┐
 │ acme/cabg-vlm          │─►│  runner  (bind port, then run)│
 │ huggingface/…          │  │  world adapter + verifier    │
 └─────────────────────┘     └──────────────┬───────────────┘
@@ -170,22 +170,22 @@ Agent packages (Harbor’s Agent — identity is `org/name`):
 
 | `port` | Input / output | Seed agent | First runner |
 |---|---|---|---|
-| `gym-policy` | obs → action | `seldingermed/cathmodel` | P1 |
+| `gym-policy` | obs → action | `seldingermed/lumen-linear` | P1 |
 | `video-predict` | clip → JSON the task named | `example/video-predictor` | P2 (AngioStress as first real dataset on this port) |
 
 ---
 
 ## 4. Target CLI (Harbor verbs)
 
-P0–P3 implement validate, bind, run, replay, jobs-as-config, and RL export. Later packages fill the public registry. Do not invent a different vocabulary.
+P0–P4 implement validate, bind, run, replay, jobs-as-config, RL export, immutable registry resolution, portable bundles, scorecards, and static vector leaderboards. Do not invent a different vocabulary.
 
 ```bash
 # P0 — contract
 or-audit tasks validate docs/examples/tasks/lumen-nav-safe
 or-audit tasks validate docs/examples/tasks/video-nextstep
-or-audit agents validate docs/examples/agents/seldingermed-cathmodel
+or-audit agents validate docs/examples/agents/seldingermed-lumen-linear
 or-audit bind docs/examples/tasks/lumen-nav-safe \
-              docs/examples/agents/seldingermed-cathmodel
+              docs/examples/agents/seldingermed-lumen-linear
 or-audit datasets validate docs/examples/datasets/lumen-nav-v0
 
 # P1 — gym-policy. Pin world_pin in task.toml. CI uses a factory; live Lumen is optional.
@@ -204,23 +204,30 @@ or-audit run -d docs/examples/datasets/angiostress-v0 \
 or-audit run -c job.toml
 or-audit export-rl jobs/lumen-nav-safe --projection gated_reach_v0 --out rollouts.jsonl
 
-# P4 — registry (public): datasets *and* agents
+# P4 — immutable public registry, portable replay, static vector result surfaces
 or-audit datasets list
-or-audit agents list
-or-audit run -d acme/cabg-nextstep@0 -a acme/cabg-vlm
+or-audit agents pull seldingermed/lumen-linear@0 --out packages
+or-audit run -d seldingermed/lumen-nav@0 -a seldingermed/lumen-linear@0 \
+         -n 30 --out jobs/lumen-linear
+or-audit replay jobs/lumen-linear/lumen-nav-safe
+or-audit leaderboard jobs --out site
 ```
 
 A job directory mirrors Harbor’s, with the reward file replaced:
 
 ```
 jobs/<job>/
-  config.json
-  result.json                 # vector aggregates, never a lone mean-reward
+  bundle/
+    task/                    # exact task package
+    agent/                   # exact agent package, if not builtin
+  config.json               # relative bundle paths + package digests
+  bundle.json               # immutable package manifest
+  result.json               # vector aggregates, never a lone mean-reward
+  scorecard.{json,md,html}  # deterministic human/machine result surfaces
   trial-<task>-<i>/
-    config.json
-    result.json               # TrialVector + identities
-    trajectory.json           # actions, obs, info (and images by ref)
-    projection.json           # optional, versioned, for RL only
+    result.json             # TrialVector
+    trajectory.json         # verifier-reconstitutable evidence
+    projection.json         # optional, versioned, for RL only
 ```
 
 There is no `verifier/reward.txt`. If an RL adapter needs a float, it reads `projection.json`.
@@ -235,7 +242,7 @@ Ship small, versioned, claim-bounded. Each dataset is a directory of tasks plus 
 
 ### D1 — `seldingermed/lumen-nav` (P1, public, `phi=procedural`, port=`gym-policy`)
 
-**First runnable dataset, not the flagship of the company.** Five gym ids already in Lumen, one task each. Headline `safe_success`. Physics oracle. Agent: any `gym-policy` package (`seldingermed/cathmodel`, `random`, a stranger’s checkpoint).
+**First runnable dataset, not the flagship of the company.** Five gym ids already in Lumen, one task each. Headline `safe_success`. Physics oracle. Agent: any `gym-policy` package (`seldingermed/lumen-linear`, `random`, a stranger’s checkpoint).
 
 This *is* Lumen’s existing bench, pulled through the harness so a reach-only row cannot publish.
 
@@ -278,7 +285,7 @@ Each package has a ship artifact and an acceptance test. Do the next package onl
 **Acceptance:**
 
 - Both port seeds load: `lumen-nav-safe` (`gym-policy`), `video-nextstep` (`video-predict`).
-- `seldingermed/cathmodel` binds to the gym task and is refused on the video task.
+- `seldingermed/lumen-linear` binds to the gym task and is refused on the video task.
 - `example/video-predictor` binds to the video task and is refused on the gym task.
 - A task without `[port]` is rejected.
 - A video-predict task without `prediction` is rejected.
@@ -300,7 +307,7 @@ Each package has a ship artifact and an acceptance test. Do the next package onl
 - Optional extra `or-audit[lumen]` (do not make Newton a hard dependency).
 - World adapter: `gymnasium.make(gym_id)` against a **pinned** Lumen commit recorded in `task.toml`.
 - Agent adapter: `random` and `org/name` packages whose port is `gym-policy`.
-- `or-audit run -d seldingermed/lumen-nav@0 -a seldingermed/cathmodel --n 30` writes a Harbor-shaped job directory.
+- `or-audit run -d seldingermed/lumen-nav@0 -a seldingermed/lumen-linear@0 --n 30` writes a Harbor-shaped job directory.
 - Map `info[success|safe_success|unsafe|diverged|max_pen]` onto `TrialVector`.
 - Replay: rerun writes an identical vector for the same seed.
 
@@ -362,7 +369,7 @@ Only after P4 replay is boring.
 
 **Build:** GPU workers that run jobs; tenant isolation for uploaded checkpoints; no `deidentified_clinical` tasks on the shared pool; audit head stored outside the tenant. Upload path: agent weights + dataset (or a pointer to a public one). Bind before run.
 
-**Acceptance:** two tenants cannot read each other’s weights or results; a PHI-class task is refused on the public pool; `acme/cabg-vlm` against `acme/cabg-nextstep` is the same job type as `seldingermed/cathmodel` against `seldingermed/lumen-nav`.
+**Acceptance:** two tenants cannot read each other’s weights or results; a PHI-class task is refused on the public pool; `acme/cabg-vlm` against `acme/cabg-nextstep` is the same job type as `seldingermed/lumen-linear` against `seldingermed/lumen-nav`.
 
 ### P6 — Image-conditioned / world-model agents
 
@@ -435,6 +442,13 @@ C-SATS remains the prior for *surgeon scoring*. It is not the prior for this pla
 
 ---
 
-## 10. Immediate next step
+## 10. Current product boundary and next evidence
 
-P1–P3 are in this repository: `or-audit run` / `or-audit replay` / `or-audit run -c job.toml` / `or-audit export-rl` for gym-policy (random + optional Lumen) and video-predict (labels vs JSON, AngioStress claim footer). Default CI does not import Newton. Next is P4 — the public `org/name` registry.
+P1–P4 now run end to end: executable policy and frozen-model packages, task-owned
+verifiers, pinned Lumen and AngioStress worlds, self-contained replay bundles,
+deterministic scorecards, and the public `org/name@version` registry at
+`SeldingerMed/seldinger-tasks`. The next milestone is not another kernel phase.
+It is one external lab or model team running a published package without a harness
+change and deciding whether the resulting third-party scorecard is worth paying for.
+Until that evidence exists, hosted tenancy, accounts, queues, and clinical media stay
+deferred.

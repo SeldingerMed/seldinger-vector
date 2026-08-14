@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 from pathlib import Path
 
@@ -13,14 +14,15 @@ from or_audit.errors import ScoreContractError, TaskContractError
 from or_audit.eval.bind import assert_bind
 from or_audit.eval.loader import load_agent, load_dataset, load_task
 from or_audit.eval.task import ProjectionSpec, TaskSpec
-from or_audit.eval.vector import TrialVector, project, vector_from_lumen_info
+from or_audit.eval.vector import TrialVector, project
+from or_audit.eval.verifier import score_context
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_TASK = ROOT / "docs" / "examples" / "tasks" / "lumen-nav-safe"
 VIDEO_TASK = ROOT / "docs" / "examples" / "tasks" / "video-nextstep"
 EXAMPLE_DATASET = ROOT / "docs" / "examples" / "datasets" / "lumen-nav-v0"
 VIDEO_DATASET = ROOT / "docs" / "examples" / "datasets" / "video-nextstep-v0"
-CATH_AGENT = ROOT / "docs" / "examples" / "agents" / "seldingermed-cathmodel"
+CATH_AGENT = ROOT / "docs" / "examples" / "agents" / "seldingermed-lumen-linear"
 VIDEO_AGENT = ROOT / "docs" / "examples" / "agents" / "example-video-predictor"
 
 
@@ -92,22 +94,22 @@ class TestExampleTaskLoads:
         with pytest.raises(TaskContractError, match="missing"):
             load_task(tmp_path / "task.toml")
 
-    def test_unpinned_task_is_valid_but_not_runnable(self):
-        task = load_task(EXAMPLE_TASK)
-        with pytest.raises(TaskContractError, match="world_pin"):
-            task.assert_runnable()
-
-    def test_pinned_task_is_runnable(self, tmp_path):
+    def test_unpinned_task_is_valid_but_not_runnable(self, tmp_path):
         dest = _copy_task(tmp_path)
-        _patch_toml(dest / "task.toml", 'world_pin = ""', 'world_pin = "abc123def"')
-        load_task(dest).assert_runnable()
+        pin = load_task(dest).environment.world_pin
+        _patch_toml(dest / "task.toml", f'world_pin = "{pin}"', 'world_pin = ""')
+        with pytest.raises(TaskContractError, match="world_pin"):
+            load_task(dest).assert_runnable()
+
+    def test_pinned_task_is_runnable(self):
+        load_task(EXAMPLE_TASK).assert_runnable()
 
     def test_describe_names_the_headline_and_refuses_human_det(self):
         text = load_task(EXAMPLE_TASK).describe()
         assert "headline   safe_success" in text
         assert "port       gym-policy" in text
         assert "human det. refused" in text
-        assert "unpinned" in text
+        assert "3c6bb39" in text
 
 
 class TestContractRefusals:
@@ -184,7 +186,7 @@ class TestContractRefusals:
 
 
 class TestBind:
-    def test_cathmodel_binds_to_lumen(self):
+    def test_lumen_linear_binds_to_lumen(self):
         assert_bind(load_task(EXAMPLE_TASK), load_agent(CATH_AGENT))
 
     def test_video_predictor_binds_to_video_task(self):
@@ -197,6 +199,9 @@ class TestBind:
     def test_wrong_kind_does_not_bind(self, tmp_path):
         dest = tmp_path / "agent"
         dest.mkdir()
+        (dest / "weights.bin").write_bytes(b"weights")
+        (dest / "agent.py").write_text("def load_predictor(**kwargs): pass\n", encoding="utf-8")
+        weights_pin = hashlib.sha256(b"weights").hexdigest()
         (dest / "agent.toml").write_text(
             "\n".join(
                 [
@@ -205,6 +210,9 @@ class TestBind:
                     'agent_version = "0"',
                     'port = "gym-policy"',
                     'kind = "vlm"',
+                    f'weights_pin = "{weights_pin}"',
+                    'weights_path = "weights.bin"',
+                    'entrypoint = "agent.py:load_predictor"',
                     "",
                 ]
             ),
@@ -235,7 +243,7 @@ class TestBind:
 
     def test_agent_id_is_org_slash_name(self):
         agent = load_agent(CATH_AGENT)
-        assert agent.id == "seldingermed/cathmodel"
+        assert agent.id == "seldingermed/lumen-linear"
         assert agent.port.value == "gym-policy"
 
     def test_agent_without_slash_is_rejected(self, tmp_path):
@@ -261,14 +269,14 @@ class TestBind:
 class TestDataset:
     def test_example_dataset_loads_the_task(self):
         dataset = load_dataset(EXAMPLE_DATASET)
-        assert dataset.id == "lumen-nav-v0"
+        assert dataset.id == "seldingermed/lumen-nav"
         assert dataset.headline == "safe_success"
         assert len(dataset.tasks) == 1
         assert dataset.tasks[0].id == "lumen-nav-safe"
 
     def test_video_predict_dataset_loads(self):
         dataset = load_dataset(VIDEO_DATASET)
-        assert dataset.id == "video-nextstep-v0"
+        assert dataset.id == "seldingermed/video-nextstep"
         assert dataset.headline == "next_step_correct"
         assert dataset.tasks[0].port.id.value == "video-predict"
 
@@ -279,7 +287,7 @@ class TestDataset:
             "\n".join(
                 [
                     'format_version = "1"',
-                    'id = "bad-headline"',
+                    'id = "example/bad-headline"',
                     'dataset_version = "0"',
                     'headline = "max_pen"',
                     'phi_class = "procedural"',
@@ -297,13 +305,12 @@ class TestDataset:
 
 class TestTrialVector:
     def _vector(self, info: dict[str, object]) -> TrialVector:
-        task = load_task(EXAMPLE_TASK)
-        return vector_from_lumen_info(
-            task=task,
+        return score_context(
+            task=load_task(EXAMPLE_TASK),
+            task_dir=EXAMPLE_TASK,
             agent_identity="random@0",
             seed=0,
-            info=info,
-            safety_max_pen=0.3,
+            context={"kind": "gym-policy", "info": info, "safety_max_pen": 0.3},
         )
 
     def test_safe_success_is_the_headline(self):
@@ -381,7 +388,7 @@ class TestCli:
         assert main(["tasks", "validate", str(EXAMPLE_TASK)]) == 0
         out = capsys.readouterr().out
         assert "valid: lumen-nav-safe@0" in out
-        assert "not runnable" in out
+        assert " runnable" in out
 
     def test_tasks_describe_example(self, capsys):
         assert main(["tasks", "describe", str(EXAMPLE_TASK)]) == 0
@@ -391,7 +398,7 @@ class TestCli:
 
     def test_datasets_validate_example(self, capsys):
         assert main(["datasets", "validate", str(EXAMPLE_DATASET)]) == 0
-        assert "lumen-nav-v0@0" in capsys.readouterr().out
+        assert "seldingermed/lumen-nav@0" in capsys.readouterr().out
 
     def test_tasks_validate_rejects_a_broken_task(self, capsys, tmp_path):
         dest = _copy_task(tmp_path)
@@ -401,12 +408,12 @@ class TestCli:
 
     def test_agents_validate_example(self, capsys):
         assert main(["agents", "validate", str(CATH_AGENT)]) == 0
-        assert "seldingermed/cathmodel" in capsys.readouterr().out
+        assert "seldingermed/lumen-linear" in capsys.readouterr().out
 
     def test_bind_matching_ports(self, capsys):
         assert main(["bind", str(EXAMPLE_TASK), str(CATH_AGENT)]) == 0
         out = capsys.readouterr().out
-        assert "seldingermed/cathmodel" in out
+        assert "seldingermed/lumen-linear" in out
         assert "gym-policy" in out
 
     def test_bind_refuses_a_video_model_on_a_gym_task(self, capsys):

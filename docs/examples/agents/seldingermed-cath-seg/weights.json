@@ -1,0 +1,27 @@
+{
+  "benchmark": "angiostress-v0.1-real-data",
+  "source_url": "https://github.com/SeldingerMed/angiostress-benchmark.git",
+  "source_pin": "d386bcc2f5bc534d18e9a866340adfc4f51e6463",
+  "artifact_base_url": "https://huggingface.co/datasets/txmedai/angiostress-benchmark/resolve/main/",
+  "archives": [
+    {
+      "path": "archives/experiments__main__run-dias-contract-full-test-v0__outputs__predictions.tar",
+      "sha256": "f541216ecb0663e43b9fe326bdaffcb74c98ebcf5b6206ae965afd73a1b0d123",
+      "target": "experiments/main/run-dias-contract-full-test-v0/outputs/predictions",
+      "files": 345
+    },
+    {
+      "path": "archives/cathaction_full_nonempty_5225_predictions.tar",
+      "sha256": "76a0a25338b107e549016320c3403595f19a7892e864d619f54bed8ea46f3055",
+      "target": "experiments/main/run-cathaction-real-scaleup-v0/outputs/full_nonempty_5225/cathaction_predictions",
+      "files": 31350
+    },
+    {
+      "path": "archives/cathaction_full_nonempty_5225_overlays.tar",
+      "sha256": "3d323079264de6faf5e1e87b70f5f6a734a9ade851f464a3887b4b216afb4309",
+      "target": "experiments/main/run-cathaction-real-scaleup-v0/outputs/full_nonempty_5225/cathaction_overlays",
+      "files": 15675
+    }
+  ],
+  "frozen_models": ["sam_vit_b", "sam_vit_l", "medsam_vit_b"]
+}

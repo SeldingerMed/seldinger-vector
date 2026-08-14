@@ -21,6 +21,7 @@ class = "public"
 kind = "frame-source"
 n_eval_episodes = 3
 seed_policy = "held-out-split"
+inputs_path = "inputs.json"
 labels_path = "labels.json"
 
 [port]
@@ -39,6 +40,7 @@ kind = "contract"
 [verifier]
 abstain_ok = true
 headline = "next_step_correct"
+entrypoint = "verifier.py:load_verifier"
 
 [[verifier.gates]]
 id = "unsafe_prediction"
