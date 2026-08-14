@@ -126,6 +126,7 @@ def analyze(
         detectors=tuple(detectors),
         source_frame_count=source.frame_count,
         source_frame_rate=source.frame_rate,
+        analysis_stride_frames=policy.analysis_stride_frames,
         dropped_segments=segments,
         masked_boxes=boxes,
     )
@@ -140,6 +141,7 @@ def analyze(
             "detectors": list(plan.detectors),
             "dropped_segments": len(plan.dropped_segments),
             "masked_boxes": len(plan.masked_boxes),
+            "min_detectable_event_seconds": plan.min_detectable_event_seconds,
         },
     )
     return updated, plan
@@ -185,6 +187,7 @@ def redact(
     _reject_settled(asset)
     _require_analysed(asset)
     _require_plan_matches_source(asset, plan, source)
+    _reject_total_redaction(asset, plan)
     written = writer.write(apply_plan(source, plan), frame_rate=plan.source_frame_rate)
     verified_sha256 = _verify_written_output(asset, written)
 
@@ -245,6 +248,7 @@ def discard(
             detectors=(),
             source_frame_count=0,
             source_frame_rate=1.0,
+            analysis_stride_frames=policy.analysis_stride_frames,
         ),
         source_sha256=asset.sha256,
         output_sha256=None,
@@ -345,6 +349,23 @@ def _require_plan_matches_source(
             f"plan for media {asset.id} was built at {plan.source_frame_rate}fps "
             f"but the source is {source.frame_rate}fps; timestamps in the plan "
             f"would not line up with the frames"
+        )
+        raise DeidentificationBoundaryError(msg)
+
+
+def _reject_total_redaction(asset: MediaAsset, plan: RedactionPlan) -> None:
+    """Route a wholly out-of-body recording to ``discard`` rather than failing.
+
+    A plan that drops every frame is a real outcome -- the camera never entered
+    the patient -- but it is not a redaction. Letting it reach the writer
+    surfaces as a bare "produced no frames" error with no indication of what to
+    do instead.
+    """
+    if plan.drops_everything:
+        msg = (
+            f"the plan for media {asset.id} drops every frame, so there is no "
+            f"recording left to attest; a wholly out-of-body capture should be "
+            f"destroyed with discard() rather than redacted"
         )
         raise DeidentificationBoundaryError(msg)
 

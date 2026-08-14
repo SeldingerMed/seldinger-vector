@@ -108,5 +108,7 @@ class DeidAttestation(BaseModel):
             "dropped_segments": len(self.plan.dropped_segments),
             "masked_boxes": len(self.plan.masked_boxes),
             "output_frame_count": self.output_frame_count,
+            "min_detectable_event_seconds": self.plan.min_detectable_event_seconds,
+            "recall_bounded": self.plan.is_recall_bounded,
             "attestation_sha256": self.digest,
         }

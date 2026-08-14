@@ -107,8 +107,8 @@ def detect_out_of_body(
     source: FrameSource,
     *,
     threshold: float = 0.40,
-    stride: int = 15,
-    min_duration_s: float = 0.5,
+    stride: int = 1,
+    min_duration_s: float = 0.0,
 ) -> tuple[TimeSegment, ...]:
     """Find spans where the camera appears to be outside the patient.
 
@@ -117,10 +117,14 @@ def detect_out_of_body(
         threshold: Redness ratio at or below which a frame is judged
             out-of-body. The default sits between the achromatic 0.333 and the
             in-body floor of roughly 0.45.
-        stride: Analyse every ``stride``-th frame.
-        min_duration_s: Discard runs shorter than this. A single dark or
-            washed-out frame mid-procedure is not the camera leaving the body,
-            and without this the output is unusable flicker.
+        stride: Analyse every ``stride``-th frame. Defaults to 1. Anything
+            higher bounds recall: a run shorter than ``stride`` frames can fall
+            entirely between two samples and never be seen at all. Callers
+            raising it must surface the bound (see ``RedactionPlan``).
+        min_duration_s: Discard runs shorter than this. Defaults to 0, i.e.
+            report everything. A floor cannot tell flicker from a genuine
+            short exit, and dropping a true positive puts the room into an
+            attested recording.
 
     Returns:
         Merged, ascending, non-overlapping segments.

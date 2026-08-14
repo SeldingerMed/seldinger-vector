@@ -74,8 +74,14 @@ class NpzFrameWriter:
             frames=np.stack(stack).astype(np.uint8),
             frame_rate=np.float64(frame_rate),
         )
-        # numpy appends .npz when the path lacks the suffix.
-        written = self._path if self._path.exists() else self._path.with_suffix(".npz")
+        # numpy appends .npz unless the path already ends in it. with_suffix
+        # would be wrong here: for "out.bin" numpy writes "out.bin.npz" while
+        # with_suffix looks for "out.npz".
+        written = (
+            self._path
+            if self._path.suffix == ".npz"
+            else self._path.with_name(self._path.name + ".npz")
+        )
         return WrittenOutput(
             uri=written.as_uri(),
             sha256=digest_file(written),

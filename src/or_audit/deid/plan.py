@@ -53,8 +53,35 @@ class RedactionPlan(BaseModel):
     detectors: tuple[str, ...]
     source_frame_count: Annotated[int, Field(ge=0)]
     source_frame_rate: Annotated[float, Field(gt=0.0)]
+    #: Frame stride the detectors ran at. Recorded because it bounds what the
+    #: plan could possibly have found, and a reader of the attestation is
+    #: entitled to know that bound rather than infer completeness.
+    analysis_stride_frames: Annotated[int, Field(ge=1)] = 1
     dropped_segments: tuple[PlannedSegment, ...] = ()
     masked_boxes: tuple[PlannedBox, ...] = ()
+
+    @property
+    def min_detectable_event_seconds(self) -> float:
+        """Shortest out-of-body run this analysis was guaranteed to see.
+
+        A run spanning ``k`` consecutive frames contains at least one sampled
+        frame only when ``k >= stride``. Anything shorter may have fallen
+        between samples, so this is a hard bound on recall, not an estimate.
+        """
+        return self.analysis_stride_frames / self.source_frame_rate
+
+    @property
+    def is_recall_bounded(self) -> bool:
+        """Whether sampling could have missed short events entirely."""
+        return self.analysis_stride_frames > 1
+
+    @property
+    def drops_everything(self) -> bool:
+        """Whether the plan would remove every frame."""
+        if self.source_frame_count == 0:
+            return True
+        total_s = self.source_frame_count / self.source_frame_rate
+        return any(s.start_s <= 0.0 and s.end_s >= total_s - 1e-9 for s in self.dropped_segments)
 
     @property
     def is_noop(self) -> bool:

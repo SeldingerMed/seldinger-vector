@@ -46,15 +46,40 @@ class DeidPolicy(BaseModel):
     redact_overlays: bool = True
 
     out_of_body_threshold: Annotated[float, Field(gt=0.0, lt=1.0)] = 0.40
-    out_of_body_min_duration_s: Annotated[float, Field(ge=0.0)] = 0.5
-    analysis_stride_frames: Annotated[int, Field(ge=1)] = 15
+
+    #: Minimum length of an out-of-body run to report. Defaults to zero: any
+    #: run at all is reported.
+    #:
+    #: This started at 0.5s to suppress single-frame flicker, and that was
+    #: wrong. The floor cannot distinguish a washed-out frame from a genuine
+    #: half-second lens wipe, so it discarded real exits -- an 8-frame exit at
+    #: 30fps spans 0.27s and vanished entirely. Suppressing a false positive
+    #: costs a redacted frame of anatomy; suppressing a true positive puts the
+    #: room in an attested recording. The floor is retained as a knob for
+    #: callers who have measured their own footage and want it.
+    out_of_body_min_duration_s: Annotated[float, Field(ge=0.0)] = 0.0
+
+    #: Analyse every Nth frame. Defaults to 1, i.e. every frame.
+    #:
+    #: Sampling bounds detection recall: an out-of-body run shorter than the
+    #: stride can fall entirely between two samples and never be seen. At the
+    #: previous default of 15, a 13-frame lens-clean was invisible and its
+    #: frames were written into output attested as de-identified. Raising this
+    #: is a legitimate speed trade, but it is not free, so the resulting plan
+    #: and attestation both record the recall bound it implies.
+    analysis_stride_frames: Annotated[int, Field(ge=1)] = 1
+    #: Why recall is being bounded. Required whenever the stride exceeds 1,
+    #: for the same reason audio retention needs one: departing from the safe
+    #: default must be a deliberate, recorded act rather than a config value
+    #: nobody revisits.
+    sampling_justification: str | None = None
 
     overlay_stride_frames: Annotated[int, Field(ge=1)] = 30
     overlay_max_std: Annotated[float, Field(ge=0.0)] = 2.0
     overlay_block_px: Annotated[int, Field(ge=1)] = 16
 
     def model_post_init(self, _context: object, /) -> None:
-        """Require a justification when audio is retained."""
+        """Require justifications for departures from the safe defaults."""
         if (
             self.audio is AudioDisposition.RETAIN_WITH_REVIEW
             and not self.audio_retention_justification
@@ -62,5 +87,13 @@ class DeidPolicy(BaseModel):
             msg = (
                 "retaining intraoperative audio departs from the section 8 "
                 "default and requires audio_retention_justification"
+            )
+            raise ValueError(msg)
+        if self.analysis_stride_frames > 1 and not self.sampling_justification:
+            msg = (
+                f"an analysis stride of {self.analysis_stride_frames} cannot detect "
+                f"out-of-body runs shorter than {self.analysis_stride_frames} frames, "
+                f"so material can reach an attested recording; this is a deliberate "
+                f"recall trade and requires sampling_justification"
             )
             raise ValueError(msg)

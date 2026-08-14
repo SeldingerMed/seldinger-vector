@@ -196,8 +196,8 @@ class TestRedactProducesRealOutput:
         )
         assert final.readable_uri.endswith("out.npz")
 
-    def test_writer_refuses_to_emit_an_empty_recording(self, episode_id, policy, tmp_path):
-        """Everything dropped means analysis failed, not that the case is clean."""
+    def test_total_redaction_is_routed_to_discard(self, episode_id, policy, tmp_path):
+        """A wholly out-of-body capture is destroyed, not attested as redacted."""
         analysed, _ = analyze(make_asset(episode_id), dirty_source(), policy)
         drop_all = RedactionPlan(
             policy_version=policy.version,
@@ -206,7 +206,7 @@ class TestRedactProducesRealOutput:
             source_frame_rate=DIRTY_FRAME_RATE,
             dropped_segments=(PlannedSegment(start_s=0.0, end_s=99.0, reason="everything"),),
         )
-        with pytest.raises(ValueError, match="empty output cannot be attested"):
+        with pytest.raises(DeidentificationBoundaryError, match="discard\\(\\) rather than"):
             redact(
                 analysed,
                 dirty_source(),

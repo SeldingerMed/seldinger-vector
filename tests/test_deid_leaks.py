@@ -374,3 +374,177 @@ class TestPolicyAndPlanVersionsMustAgree:
                 output_uri="file:///out.npz",
                 output_frame_count=10,
             )
+
+
+class TestSamplingRecallIsBoundedAndDeclared:
+    """Sampling cannot silently lose short events.
+
+    Original defect: `analysis_stride_frames` defaulted to 15, so an
+    out-of-body run shorter than 15 frames could fall entirely between two
+    samples and never be flagged. A 13-frame lens-clean at 30fps was invisible,
+    and its frames were written into output attested as de-identified.
+
+    Two changes close it. The default is now 1, so nothing is skipped. A caller
+    who raises the stride still gets correct behaviour for events at or above
+    the bound, and the plan records the bound so the artifact cannot be read as
+    a completeness claim.
+    """
+
+    @pytest.mark.parametrize("run_length", [1, 2, 5, 8, 13, 14, 20])
+    def test_short_runs_are_found_at_the_default_stride(self, run_length):
+        pattern = [in_body()] * 16 + [out_of_body()] * run_length + [in_body()] * 100
+        assert leaked_frame_count(pattern, stride=1) == 0
+
+    @pytest.mark.parametrize("onset", [1, 8, 16, 17, 29, 31, 100, 101])
+    def test_onset_sweep_leaks_nothing_at_the_default_stride(self, onset):
+        pattern = [in_body()] * onset + [out_of_body()] * 13 + [in_body()] * 100
+        assert leaked_frame_count(pattern, stride=1) == 0
+
+    def test_default_policy_uses_full_recall(self):
+        policy = DeidPolicy()
+        assert policy.analysis_stride_frames == 1
+        assert policy.out_of_body_min_duration_s == 0.0
+
+    def test_plan_reports_no_recall_bound_at_full_sampling(self):
+        source = InMemoryFrameSource([in_body()] * 60, frame_rate=FRAME_RATE)
+        asset = MediaAsset(
+            id=new_media_asset_id(),
+            episode_id=new_episode_id(),
+            kind=MediaKind.ENDOSCOPIC_VIDEO,
+            raw_uri="s3://raw/case.mp4",
+            sha256="a" * 64,
+            deid_status=DeidStatus.RAW,
+        )
+        _, plan = analyze(asset, source, DeidPolicy())
+        assert plan.is_recall_bounded is False
+        assert plan.min_detectable_event_seconds == pytest.approx(1 / FRAME_RATE)
+
+    def test_plan_declares_the_bound_when_a_caller_raises_the_stride(self):
+        """Sampling is a legitimate speed trade, but not a silent one."""
+        source = InMemoryFrameSource([in_body()] * 300, frame_rate=FRAME_RATE)
+        asset = MediaAsset(
+            id=new_media_asset_id(),
+            episode_id=new_episode_id(),
+            kind=MediaKind.ENDOSCOPIC_VIDEO,
+            raw_uri="s3://raw/case.mp4",
+            sha256="a" * 64,
+            deid_status=DeidStatus.RAW,
+        )
+        _, plan = analyze(
+            asset,
+            source,
+            DeidPolicy(analysis_stride_frames=15, sampling_justification="perf test"),
+        )
+        assert plan.is_recall_bounded is True
+        assert plan.min_detectable_event_seconds == pytest.approx(0.5)
+
+    def test_events_at_or_above_the_bound_are_still_found_when_sampling(self):
+        """The bound is a real guarantee, not a disclaimer."""
+        for onset in range(0, 30):
+            pattern = [in_body()] * onset + [out_of_body()] * 15 + [in_body()] * 60
+            assert leaked_frame_count(pattern, stride=15) == 0, f"onset {onset}"
+
+
+class TestDurationFloorDoesNotDiscardRealExits:
+    """The minimum-duration floor no longer suppresses true positives.
+
+    Original defect: the floor defaulted to 0.5s to suppress single-frame
+    flicker, but it cannot tell flicker from a genuine short exit. An 8-frame
+    exit at 30fps spans 0.27s and was dropped from the plan entirely, so the
+    room reached the attested output.
+    """
+
+    @pytest.mark.parametrize("run_length", [1, 2, 4, 8, 14])
+    def test_sub_half_second_mid_case_exits_are_redacted(self, run_length):
+        pattern = [in_body()] * 100 + [out_of_body()] * run_length + [in_body()] * 100
+        assert leaked_frame_count(pattern, stride=1) == 0
+
+    def test_floor_remains_available_to_callers_who_want_it(self):
+        source = InMemoryFrameSource(
+            [in_body()] * 100 + [out_of_body()] + [in_body()] * 100, frame_rate=FRAME_RATE
+        )
+        assert detect_out_of_body(source, stride=1, min_duration_s=0.5) == ()
+        assert detect_out_of_body(source, stride=1) != ()
+
+
+class TestTotalRedactionRoutesToDiscard:
+    """A wholly out-of-body capture is destroyed, not attested as redacted."""
+
+    def test_all_out_of_body_recording_is_refused_with_a_route(self, tmp_path):
+        source = InMemoryFrameSource([out_of_body()] * 60, frame_rate=FRAME_RATE)
+        asset = MediaAsset(
+            id=new_media_asset_id(),
+            episode_id=new_episode_id(),
+            kind=MediaKind.ENDOSCOPIC_VIDEO,
+            raw_uri="s3://raw/case.mp4",
+            sha256="a" * 64,
+            deid_status=DeidStatus.RAW,
+        )
+        analysed, plan = analyze(asset, source, DeidPolicy())
+        assert plan.drops_everything
+        with pytest.raises(DeidentificationBoundaryError, match="discard"):
+            redact(
+                analysed,
+                source,
+                plan,
+                DeidPolicy(),
+                NpzFrameWriter(tmp_path / "o.npz"),
+                performed_by="deid-pipeline",
+            )
+
+
+class TestWriterPathResolution:
+    """A non-.npz path must not resolve to the wrong file."""
+
+    def test_non_npz_suffix_still_verifies(self, tmp_path):
+        source = InMemoryFrameSource([in_body()] * 30, frame_rate=FRAME_RATE)
+        asset = MediaAsset(
+            id=new_media_asset_id(),
+            episode_id=new_episode_id(),
+            kind=MediaKind.ENDOSCOPIC_VIDEO,
+            raw_uri="s3://raw/case.mp4",
+            sha256="a" * 64,
+            deid_status=DeidStatus.RAW,
+        )
+        analysed, plan = analyze(asset, source, DeidPolicy())
+        final, attestation = redact(
+            analysed,
+            source,
+            plan,
+            DeidPolicy(),
+            NpzFrameWriter(tmp_path / "out.bin"),
+            performed_by="deid-pipeline",
+        )
+        assert final.deid_status is DeidStatus.ATTESTED
+        assert (tmp_path / "out.bin.npz").exists()
+        assert attestation.output_uri is not None
+        assert attestation.output_uri.endswith("out.bin.npz")
+
+
+class TestCoarseSamplingRequiresInformedConsent:
+    """Bounded recall cannot be entered by accident.
+
+    Residual leaks are only reachable by explicitly raising the stride above
+    the guaranteed-detection bound. That is a legitimate speed trade on long
+    recordings, but it is not a default and it is not silent: it mirrors the
+    audio-retention rule, where departing from the safe disposition requires a
+    recorded justification.
+    """
+
+    def test_raising_the_stride_without_a_justification_is_refused(self):
+        with pytest.raises(ValueError, match="requires sampling_justification"):
+            DeidPolicy(analysis_stride_frames=15)
+
+    def test_the_error_names_what_is_being_traded_away(self):
+        with pytest.raises(ValueError, match="cannot detect out-of-body runs shorter"):
+            DeidPolicy(analysis_stride_frames=30)
+
+    def test_justified_coarse_sampling_is_permitted(self):
+        policy = DeidPolicy(
+            analysis_stride_frames=15,
+            sampling_justification="8-hour archive backfill, reviewed by privacy office",
+        )
+        assert policy.analysis_stride_frames == 15
+
+    def test_the_default_needs_no_justification(self):
+        assert DeidPolicy().sampling_justification is None
