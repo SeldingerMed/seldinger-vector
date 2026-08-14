@@ -51,15 +51,24 @@ def make_asset(episode_id: str, kind: MediaKind = MediaKind.ENDOSCOPIC_VIDEO) ->
     )
 
 
-def dirty_source(*, overlay: bool = True, tail_out_of_body: bool = True):
-    """Twenty in-body frames, optionally with an overlay and an exit."""
+#: Ninety frames at 30fps, i.e. three seconds. Long enough that the default
+#: 15-frame analysis stride resolves the exit without the conservative
+#: both-sides gap expansion swallowing the whole clip. On a 20-frame clip it
+#: does swallow everything, and that is correct behaviour rather than a bug:
+#: at stride 15 the detector genuinely cannot localise the transition.
+DIRTY_FRAME_COUNT = 90
+DIRTY_FRAME_RATE = 30.0
+
+
+def dirty_source(*, overlay: bool = True, tail_out_of_body: bool = True) -> InMemoryFrameSource:
+    """An in-body recording, optionally with an overlay and a closing exit."""
     frames = []
-    for index in range(20):
-        frame = room_frame(index) if tail_out_of_body and index >= 15 else in_body_frame(index)
+    for index in range(DIRTY_FRAME_COUNT):
+        frame = room_frame(index) if tail_out_of_body and index >= 75 else in_body_frame(index)
         if overlay:
             frame[0:16, 0:32] = 255
         frames.append(frame)
-    return InMemoryFrameSource(frames, frame_rate=10.0)
+    return InMemoryFrameSource(frames, frame_rate=DIRTY_FRAME_RATE)
 
 
 @pytest.fixture
@@ -160,7 +169,7 @@ class TestRedactProducesRealOutput:
             performed_by="deid-pipeline",
         )
         reloaded = NpzFrameSource(tmp_path / "out.npz")
-        assert reloaded.frame_count < 20
+        assert reloaded.frame_count < DIRTY_FRAME_COUNT
 
     def test_output_has_the_overlay_region_zeroed(self, episode_id, policy, tmp_path):
         analysed, plan = analyze(make_asset(episode_id), dirty_source(), policy)
@@ -193,8 +202,8 @@ class TestRedactProducesRealOutput:
         drop_all = RedactionPlan(
             policy_version=policy.version,
             detectors=(),
-            source_frame_count=20,
-            source_frame_rate=10.0,
+            source_frame_count=DIRTY_FRAME_COUNT,
+            source_frame_rate=DIRTY_FRAME_RATE,
             dropped_segments=(PlannedSegment(start_s=0.0, end_s=99.0, reason="everything"),),
         )
         with pytest.raises(ValueError, match="empty output cannot be attested"):

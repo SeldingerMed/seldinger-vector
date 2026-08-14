@@ -73,6 +73,14 @@ class DeidAttestation(BaseModel):
         if self.discard_reason is not None:
             msg = f"attestation for {self.media_id} names a discard reason but is not discarded"
             raise DomainInvariantError(msg)
+        if self.policy.version != self.plan.policy_version:
+            msg = (
+                f"attestation for {self.media_id} carries policy version "
+                f"{self.policy.version!r} but its plan was built under "
+                f"{self.plan.policy_version!r}; the record would misdescribe "
+                f"which rules were in force"
+            )
+            raise DomainInvariantError(msg)
         if self.source_sha256 == self.output_sha256 and not self.plan.is_noop:
             msg = (
                 f"attestation for {self.media_id} claims redactions were applied "

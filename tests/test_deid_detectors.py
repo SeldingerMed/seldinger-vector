@@ -78,14 +78,16 @@ class TestOutOfBodyDetection:
         """Cameras are pulled out at the end of the case; that tail matters."""
         segments = detect_out_of_body(self._source("i" * 20 + "o" * 20), stride=1)
         assert len(segments) == 1
-        assert segments[0].start_s == pytest.approx(2.0)
-        assert segments[0].end_s == pytest.approx(4.0, abs=0.11)
+        # Starts one sample early: the transition happened somewhere in the
+        # unsampled gap and the detector covers both sides of it.
+        assert segments[0].start_s == pytest.approx(1.9)
+        assert segments[0].end_s == pytest.approx(4.0)
 
     def test_mid_procedure_run_is_found(self):
         segments = detect_out_of_body(self._source("i" * 10 + "o" * 10 + "i" * 10), stride=1)
         assert len(segments) == 1
-        assert segments[0].start_s == pytest.approx(1.0)
-        assert segments[0].end_s == pytest.approx(2.0)
+        assert segments[0].start_s == pytest.approx(0.9)
+        assert segments[0].end_s == pytest.approx(2.1)
 
     def test_two_runs_are_reported_separately(self):
         pattern = "i" * 10 + "o" * 10 + "i" * 10 + "o" * 10

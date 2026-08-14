@@ -136,27 +136,55 @@ def detect_out_of_body(
     if not indices:
         return ()
 
-    # Each sampled frame stands for the span until the next sample. The final
-    # sample extends by one frame period so the tail is covered.
+    frame_period = 1.0 / source.frame_rate
+    recording_end_s = source.frame_count * frame_period
+
+    # A flagged sample covers the unsampled gap on BOTH sides of it.
+    #
+    # One-sided coverage leaks. At stride 15, a camera exit beginning at frame
+    # 8 is first sampled at frame 15, so frames 8-14 are out-of-body material
+    # that never gets dropped. That is a PHI leak, not a rounding artifact.
+    #
+    # The transition happened somewhere inside the gap and sampling cannot say
+    # where, so both neighbouring gaps are treated as suspect. This over-drops
+    # in-body frames adjacent to an exit, which is the correct direction to be
+    # wrong in: losing a second of anatomy costs a second of anatomy, keeping
+    # one frame of the room costs a breach.
     flagged: list[tuple[float, float]] = []
     for position, index in enumerate(indices):
         frame = source.read(index)
         if redness_ratio(frame.pixels) > threshold:
             continue
-        start_s = frame.timestamp_s
-        if position + 1 < len(indices):
-            end_s = source.read(indices[position + 1]).timestamp_s
-        else:
-            end_s = frame.timestamp_s + 1.0 / source.frame_rate
-        flagged.append((start_s, end_s))
+        start_s = (
+            source.read(indices[position - 1]).timestamp_s if position > 0 else frame.timestamp_s
+        )
+        end_s = (
+            source.read(indices[position + 1]).timestamp_s + frame_period
+            if position + 1 < len(indices)
+            else recording_end_s
+        )
+        flagged.append((start_s, min(end_s, recording_end_s)))
 
-    return _merge_and_filter(flagged, min_duration_s=min_duration_s)
+    return _merge_and_filter(
+        flagged, min_duration_s=min_duration_s, recording_end_s=recording_end_s
+    )
 
 
 def _merge_and_filter(
-    spans: list[tuple[float, float]], *, min_duration_s: float
+    spans: list[tuple[float, float]],
+    *,
+    min_duration_s: float,
+    recording_end_s: float,
 ) -> tuple[TimeSegment, ...]:
-    """Merge touching spans, then drop those below the duration floor."""
+    """Merge touching spans, then drop those below the duration floor.
+
+    Segments reaching the end of the recording are exempt from the floor. The
+    floor exists to suppress single-frame flicker mid-procedure, but the
+    end-of-case camera withdrawal is both the most predictable out-of-body
+    event and often shorter than the floor -- five frames at 30fps is 0.17s.
+    Suppressing it would drop exactly the material PLAN.md section 8 names
+    first, so the floor is not allowed to reach it.
+    """
     if not spans:
         return ()
     merged: list[list[float]] = [list(spans[0])]
@@ -170,7 +198,7 @@ def _merge_and_filter(
     return tuple(
         TimeSegment(start_s=start_s, end_s=end_s)
         for start_s, end_s in merged
-        if end_s - start_s >= min_duration_s
+        if end_s - start_s >= min_duration_s or end_s >= recording_end_s - 1e-9
     )
 
 
