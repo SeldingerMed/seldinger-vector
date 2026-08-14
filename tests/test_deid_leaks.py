@@ -334,6 +334,14 @@ class TestWriterDigestIsNotTrusted:
             )
 
     def test_honest_writer_still_works(self, tmp_path):
+        """Re-hashes the file rather than comparing two internal fields.
+
+        Asserting output_sha256 == final.sha256 alone is self-satisfying: a
+        refactor that copied the writer's unverified digest into both fields
+        would pass it. The disk hash is the only external reference.
+        """
+        import hashlib
+
         analysed, source, plan = self._analysed()
         final, attestation = redact(
             analysed,
@@ -343,8 +351,10 @@ class TestWriterDigestIsNotTrusted:
             NpzFrameWriter(tmp_path / "o.npz"),
             performed_by="deid-pipeline",
         )
+        on_disk = hashlib.sha256((tmp_path / "o.npz").read_bytes()).hexdigest()
         assert final.deid_status is DeidStatus.ATTESTED
-        assert attestation.output_sha256 == final.sha256
+        assert attestation.output_sha256 == on_disk
+        assert final.sha256 == on_disk
 
 
 class TestPolicyAndPlanVersionsMustAgree:
@@ -532,12 +542,33 @@ class TestCoarseSamplingRequiresInformedConsent:
     """
 
     def test_raising_the_stride_without_a_justification_is_refused(self):
-        with pytest.raises(ValueError, match="requires sampling_justification"):
+        """Asserts the domain error type, not merely 'some ValueError'.
+
+        The looser assertion is what let the taxonomy leak ship: pydantic wraps
+        a ValueError raised in a validator into ValidationError, which is a
+        ValueError subclass, so `pytest.raises(ValueError)` passed while callers
+        guarding on DeidentificationBoundaryError silently missed the rejection.
+        """
+        with pytest.raises(DeidentificationBoundaryError, match="requires sampling_justification"):
             DeidPolicy(analysis_stride_frames=15)
 
     def test_the_error_names_what_is_being_traded_away(self):
-        with pytest.raises(ValueError, match="cannot detect out-of-body runs shorter"):
+        with pytest.raises(
+            DeidentificationBoundaryError, match="cannot detect out-of-body runs shorter"
+        ):
             DeidPolicy(analysis_stride_frames=30)
+
+    def test_policy_rejection_is_not_a_pydantic_validation_error(self):
+        """Guard the boundary contract explicitly.
+
+        ValidationError subclasses ValueError, so a test asserting ValueError
+        cannot tell the two apart. This one can.
+        """
+        from pydantic import ValidationError
+
+        with pytest.raises(DeidentificationBoundaryError) as caught:
+            DeidPolicy(analysis_stride_frames=15)
+        assert not isinstance(caught.value, ValidationError)
 
     def test_justified_coarse_sampling_is_permitted(self):
         policy = DeidPolicy(

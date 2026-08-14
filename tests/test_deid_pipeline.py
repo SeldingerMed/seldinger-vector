@@ -255,7 +255,9 @@ class TestDiscard:
         assert default_disposition(make_asset(episode_id), policy) is None
 
     def test_retaining_audio_requires_a_justification(self):
-        with pytest.raises(ValueError, match="requires audio_retention_justification"):
+        with pytest.raises(
+            DeidentificationBoundaryError, match="requires audio_retention_justification"
+        ):
             DeidPolicy(audio=AudioDisposition.RETAIN_WITH_REVIEW)
 
     def test_retained_audio_is_not_auto_discarded(self, episode_id):

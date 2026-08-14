@@ -8,9 +8,11 @@ release is challenged (PLAN.md section 9).
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from or_audit.errors import DeidentificationBoundaryError
 
 
 class AudioDisposition(StrEnum):
@@ -78,8 +80,19 @@ class DeidPolicy(BaseModel):
     overlay_max_std: Annotated[float, Field(ge=0.0)] = 2.0
     overlay_block_px: Annotated[int, Field(ge=1)] = 16
 
-    def model_post_init(self, _context: object, /) -> None:
-        """Require justifications for departures from the safe defaults."""
+    @model_validator(mode="after")
+    def _require_justifications(self) -> Self:
+        """Require justifications for departures from the safe defaults.
+
+        Raised as ``DeidentificationBoundaryError`` rather than ``ValueError``.
+        pydantic wraps ``ValueError`` from a validator into its own
+        ``ValidationError``, so a caller guarding the de-identification
+        boundary with ``except DeidentificationBoundaryError`` would silently
+        miss a rejected policy -- the error taxonomy would leak pydantic
+        internals at exactly the boundary it exists to describe. Exceptions
+        that do not derive from ``ValueError`` propagate unwrapped, which is
+        also how the domain entities raise ``DomainInvariantError``.
+        """
         if (
             self.audio is AudioDisposition.RETAIN_WITH_REVIEW
             and not self.audio_retention_justification
@@ -88,7 +101,7 @@ class DeidPolicy(BaseModel):
                 "retaining intraoperative audio departs from the section 8 "
                 "default and requires audio_retention_justification"
             )
-            raise ValueError(msg)
+            raise DeidentificationBoundaryError(msg)
         if self.analysis_stride_frames > 1 and not self.sampling_justification:
             msg = (
                 f"an analysis stride of {self.analysis_stride_frames} cannot detect "
@@ -96,4 +109,5 @@ class DeidPolicy(BaseModel):
                 f"so material can reach an attested recording; this is a deliberate "
                 f"recall trade and requires sampling_justification"
             )
-            raise ValueError(msg)
+            raise DeidentificationBoundaryError(msg)
+        return self
