@@ -250,9 +250,12 @@ class Episode(_Frozen):
         """Aggregate de-identification status across surviving media.
 
         Discarded assets are excluded: they are a completed disposition, not
-        outstanding work. Failure dominates; otherwise the least-advanced
-        surviving asset wins. An episode whose media were all discarded cannot
-        exist, because the video invariant rejects it at construction.
+        outstanding work. ``FAILED`` dominates. Otherwise a uniformly attested
+        set reports ``ATTESTED``, a uniformly untouched set reports ``RAW``,
+        and any mix reports ``IN_PROGRESS`` -- mixed means work has started,
+        so it is not the least-advanced asset that wins. An episode whose media
+        were all discarded cannot exist, because the surviving-video invariant
+        rejects it at construction.
         """
         statuses = {a.deid_status for a in self.media if a.is_present}
         if DeidStatus.FAILED in statuses:

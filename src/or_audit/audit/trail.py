@@ -247,6 +247,16 @@ class AuditTrail:
             subject_ref: Opaque identifier of the affected entity.
             payload: Structured detail. Must be canonicalizable.
 
+                Keys and values MUST be pseudonymous or machine-generated.
+                Unlike ``subject_ref`` and ``actor.ref``, the payload is not
+                and cannot be pattern-constrained -- it is an arbitrary
+                structured field, which makes it the widest PHI channel into a
+                record that is append-only and exportable. Writing a patient
+                or clinician identifier here is a caller-side compliance
+                violation with no structural backstop (PLAN.md section 8).
+                Enforcement, if wanted, belongs in the ingestion phase as a
+                key allowlist.
+
         Returns:
             The newly appended entry.
 

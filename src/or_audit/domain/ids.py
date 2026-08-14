@@ -22,19 +22,18 @@ from typing import Annotated, Final
 
 from pydantic import StringConstraints
 
+from or_audit.primitives import ENTITY_PREFIXES, ID_BODY_PATTERN
+
 # Crockford base32, excluding I, L, O and U to avoid transcription ambiguity.
 _ALPHABET: Final = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 _ENCODED_LEN: Final = 26
 _TIMESTAMP_BITS: Final = 48
 _RANDOM_BITS: Final = 80
 
-# Character class matching ``_ALPHABET`` for identifier validation.
-_ID_CHARS: Final = "[0-9A-HJKMNP-TV-Z]"
-
 
 def _constraint(prefix: str) -> StringConstraints:
     """Build the pydantic constraint pinning a string to one identifier prefix."""
-    return StringConstraints(pattern=rf"^{prefix}_{_ID_CHARS}{{{_ENCODED_LEN}}}$")
+    return StringConstraints(pattern=rf"^{prefix}_{ID_BODY_PATTERN}$")
 
 
 def _encode(value: int) -> str:
@@ -50,16 +49,17 @@ def mint(prefix: str) -> str:
     """Mint a new prefixed identifier.
 
     Args:
-        prefix: Short entity tag, e.g. ``"epi"``. Lowercase ASCII letters only.
+        prefix: Short entity tag, e.g. ``"epi"``. Must be one of
+            :data:`~or_audit.primitives.ENTITY_PREFIXES`.
 
     Returns:
         An identifier of the form ``<prefix>_<26 base32 chars>``.
 
     Raises:
-        ValueError: If ``prefix`` is not lowercase ASCII letters.
+        ValueError: If ``prefix`` is not a known entity prefix.
     """
-    if not prefix.isascii() or not prefix.isalpha() or not prefix.islower():
-        msg = f"identifier prefix must be lowercase ASCII letters, got {prefix!r}"
+    if prefix not in ENTITY_PREFIXES:
+        msg = f"unknown identifier prefix {prefix!r}; expected one of {', '.join(ENTITY_PREFIXES)}"
         raise ValueError(msg)
     timestamp_ms = int(time.time() * 1000) & ((1 << _TIMESTAMP_BITS) - 1)
     randomness = int.from_bytes(os.urandom(_RANDOM_BITS // 8), "big")

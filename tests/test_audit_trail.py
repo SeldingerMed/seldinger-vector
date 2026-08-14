@@ -105,6 +105,50 @@ class TestNoPhiAtTheBoundary:
     def test_slug_actor_refs_accepted(self, good_ref):
         assert Actor(kind=ActorKind.RATER, ref=good_ref).ref == good_ref
 
+    @pytest.mark.parametrize("bad_ref", ["12345678", "123-45-6789", "1", "000.11.2222"])
+    def test_bare_identifier_numbers_rejected_as_actor_ref(self, bad_ref):
+        """MRN- and SSN-shaped refs are the highest-risk PHI shapes."""
+        with pytest.raises(ValidationError, match="bare identifier number"):
+            Actor(kind=ActorKind.OPERATOR, ref=bad_ref)
+
+    def test_alphanumeric_handle_with_digits_still_accepted(self):
+        """The control targets purely numeric refs, not any ref containing digits."""
+        assert Actor(kind=ActorKind.RATER, ref="rater-0041").ref == "rater-0041"
+
+    @pytest.mark.parametrize(
+        "bad_ref",
+        [
+            "mrn_AAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "pat_AAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "ep_AAAAAAAAAAAAAAAAAAAAAAAAAA",
+        ],
+    )
+    def test_unknown_entity_prefix_rejected_as_subject(self, frozen_clock, actor, bad_ref):
+        """The prefix set is closed, so a well-formed unknown prefix must fail."""
+        built = AuditTrail(clock=frozen_clock)
+        with pytest.raises(ValidationError):
+            built.append(actor=actor, action=AuditAction.EXPORT_GRANTED, subject_ref=bad_ref)
+
+    def test_payload_accepts_arbitrary_structured_content(self, frozen_clock, actor):
+        """Documents an honest limitation rather than asserting a guarantee.
+
+        Unlike ``subject_ref`` and ``actor.ref``, the payload is an arbitrary
+        structured field and cannot be pattern-constrained without breaking
+        its purpose. It is therefore the widest PHI channel into an
+        append-only, exportable record, and keeping identifiers out of it is a
+        caller obligation with no structural backstop. If a future phase adds
+        a key allowlist, this test should start failing -- which is the point.
+        """
+        built = AuditTrail(clock=frozen_clock)
+        built.append(
+            actor=actor,
+            action=AuditAction.SCORE_COMPUTED,
+            subject_ref=SUBJECT,
+            payload={"free": "anything at all", "nested": {"also": ["free"]}},
+        )
+        built.verify()
+        assert built.entries[0].payload["free"] == "anything at all"
+
 
 class TestTamperDetection:
     def test_payload_edit_is_detected(self, trail):

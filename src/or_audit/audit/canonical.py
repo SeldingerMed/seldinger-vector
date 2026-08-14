@@ -161,9 +161,22 @@ def _render(value: Any) -> str:
         if value.tzinfo is None:
             msg = "naive datetime cannot be canonicalized; attach a timezone"
             raise ValueError(msg)
-        # Normalize to UTC so equal instants serialize identically regardless
-        # of the offset they were expressed in.
-        return _escape(value.astimezone(UTC).isoformat().replace("+00:00", "Z"))
+        # Normalized to UTC with a FIXED-WIDTH 6-digit fraction. Two reasons,
+        # both about reproducibility rather than taste:
+        #
+        # 1. Python's isoformat() omits the fraction entirely when microseconds
+        #    are zero, so two instants one microsecond apart render with
+        #    different shapes. Fixed width removes that discontinuity.
+        # 2. A third-party verifier must be able to regenerate these bytes.
+        #    Six digits is exactly what a POSIX timestamp plus a microsecond
+        #    field yields, so any language can produce it. Note that routing
+        #    the value through JavaScript's Date first will NOT reproduce it:
+        #    Date carries millisecond precision and emits 3 digits. Verifiers
+        #    should hash the stored string, or format from (epoch, micros).
+        #
+        # Microseconds are preserved, never truncated: this is an audit record.
+        moment = value.astimezone(UTC)
+        return _escape(f"{moment.strftime('%Y-%m-%dT%H:%M:%S')}.{moment.microsecond:06d}Z")
     if isinstance(value, Mapping):
         items = []
         for key in sorted(value, key=_utf16_sort_key):
