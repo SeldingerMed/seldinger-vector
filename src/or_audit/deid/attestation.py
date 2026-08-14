@@ -110,6 +110,7 @@ class DeidAttestation(BaseModel):
             "output_frame_count": self.output_frame_count,
             "min_detectable_event_seconds": self.plan.min_detectable_event_seconds,
             "overlay_min_detectable_px": self.plan.overlay_min_detectable_px,
+            "overlay_bound_validated_against": self.policy.overlay_bound_validated_against,
             "recall_bounded": self.plan.is_recall_bounded,
             "attestation_sha256": self.digest,
         }

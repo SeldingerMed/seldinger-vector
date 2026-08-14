@@ -32,7 +32,16 @@ CLOCK = datetime(2026, 3, 4, 15, 0, tzinfo=UTC)
 
 @pytest.fixture
 def policy() -> DeidPolicy:
-    return DeidPolicy()
+    """A policy cleared to attest.
+
+    Attestation requires a recorded overlay-bound measurement (PLAN.md V-10);
+    the bare default deliberately cannot attest. These tests exercise the
+    attestation mechanics, so they use a validated policy and the gate itself is
+    covered in tests/test_deid_leaks.py.
+    """
+    return DeidPolicy(
+        overlay_bound_validated_against="test fixture: synthetic overlay 16px vs 8px bound"
+    )
 
 
 @pytest.fixture

@@ -161,7 +161,16 @@ def run_demo(workdir: Path, *, episodes: int = 8) -> DemoOutcome:
         threshold_owner=ThresholdOwner.CUSTOMER,
         threshold_provenance="Demo credentialing committee minute 2026-02-11",
     )
-    policy = DeidPolicy()
+    policy = DeidPolicy(
+        # Truthful for this data and only this data: the synthetic frames are
+        # generated below with a 16-pixel-tall overlay, so the recall bound is
+        # measured rather than assumed. A real deployment must substitute its
+        # own capture survey (PLAN.md V-10); it may not reuse this string.
+        overlay_bound_validated_against=(
+            "synthetic demo frames: overlay generated at 16px tall by "
+            "or_audit.demo.synthetic_source, versus an 8px recall bound"
+        )
+    )
 
     results: list[AssessmentResult] = []
     dropped = 0

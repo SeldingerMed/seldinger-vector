@@ -15,19 +15,23 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from or_audit.errors import DeidentificationBoundaryError
 
-#: Overlay thickness at or below which a configuration is treated as capable of
-#: attesting, in pixels.
+#: Coarsest overlay bound a *validated* policy may attest at, in pixels.
 #:
-#: NOT a validated figure. It is a conservative engineering default chosen
-#: because it is fine enough that no plausible burned-in identifier is thinner,
-#: and it has not been measured against real capture systems. Establishing the
-#: actual minimum rendered text size across the capture hardware in scope is an
-#: open question of the same kind as PLAN.md section V's items, and until it is
-#: answered this constant is an assumption, not a finding.
+#: NOT a validated figure itself, and it never was. It is a conservative
+#: engineering ceiling: no plausible burned-in identifier is thinner than this,
+#: so a policy coarser than it should not attest even with a measurement in
+#: hand. Establishing the actual minimum rendered text size across the capture
+#: hardware in scope is PLAN.md V-10, and it is open.
 #:
-#: Being an assumption is why it gates attestation rather than merely annotating
-#: it: an attestation is a claim about what was removed, and a claim resting on
-#: an unvalidated coverage bound is not one this platform should make.
+#: An earlier version let this constant *substitute* for validation: a policy
+#: whose derived bound landed at or below 8px could attest, while a coarser one
+#: could not. That distinction was arbitrary. Both bounds rest on the same
+#: unmeasured assumption about how thin real identifiers get, so refusing one
+#: and permitting the other asserted a confidence nothing supported. Attestation
+#: now requires a recorded measurement (see
+#: :attr:`DeidPolicy.overlay_bound_validated_against`) *and* a bound at or below
+#: this ceiling. Until V-10 is answered for a given deployment, that deployment
+#: analyses; it does not attest.
 SAFE_OVERLAY_MIN_PX = 8
 
 
@@ -103,6 +107,15 @@ class DeidPolicy(BaseModel):
     #: It does not permit attestation -- see
     #: :attr:`guarantees_overlay_coverage`.
     overlay_recall_justification: str | None = None
+    #: Citation for the measurement establishing that every identifier this
+    #: capture pipeline burns in is thicker than
+    #: :attr:`overlay_min_detectable_px`. Required to attest.
+    #:
+    #: This is PLAN.md V-10 discharged for one deployment, and it is the only
+    #: thing that turns the detector's recall bound from an assumption into a
+    #: finding. There is no default: a deployment that has not measured its own
+    #: capture hardware has not established coverage, however fine its grid.
+    overlay_bound_validated_against: str | None = None
 
     @property
     def overlay_min_detectable_px(self) -> int:
@@ -119,14 +132,21 @@ class DeidPolicy(BaseModel):
     def guarantees_overlay_coverage(self) -> bool:
         """Whether this configuration may be used to attest.
 
-        False when the overlay grid is too coarse to guarantee coverage of the
-        thinnest identifier the platform is willing to assume exists. Such a
-        policy is still useful -- triage, archive backfill, deciding what needs
-        a finer pass -- but :func:`or_audit.deid.pipeline.redact` will not
-        produce an attested asset with it. Analysis and attestation are
-        different claims and this is the line between them.
+        Requires both a bound at or below :data:`SAFE_OVERLAY_MIN_PX` *and* a
+        recorded measurement backing it. Neither alone is enough: a fine grid
+        with no measurement is still an assumption about how thin real
+        identifiers get, and a measurement cannot rescue a grid coarser than
+        any identifier is likely to be.
+
+        A policy failing this is still useful -- triage, archive backfill,
+        deciding what needs a finer pass -- but
+        :func:`or_audit.deid.pipeline.redact` will not produce an attested
+        asset with it. Analysis and attestation are different claims, and this
+        is the line between them.
         """
-        return self.overlay_min_detectable_px <= SAFE_OVERLAY_MIN_PX
+        return self.overlay_min_detectable_px <= SAFE_OVERLAY_MIN_PX and bool(
+            self.overlay_bound_validated_against
+        )
 
     @model_validator(mode="after")
     def _require_justifications(self) -> Self:
@@ -150,7 +170,10 @@ class DeidPolicy(BaseModel):
                 "default and requires audio_retention_justification"
             )
             raise DeidentificationBoundaryError(msg)
-        if not self.guarantees_overlay_coverage and not self.overlay_recall_justification:
+        if (
+            self.overlay_min_detectable_px > SAFE_OVERLAY_MIN_PX
+            and not self.overlay_recall_justification
+        ):
             msg = (
                 f"an overlay grid of {self.overlay_block_px}px at a "
                 f"{self.overlay_min_static_fraction:g} static fraction can only "
