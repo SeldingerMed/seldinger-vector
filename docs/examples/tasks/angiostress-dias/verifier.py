@@ -18,8 +18,7 @@ class ReleaseAuditVerifier:
             prediction.get("medsam_vit_b_mean_dice"),
         ]
         finite = bool(prediction.get("finite_metric_check")) and all(
-            isinstance(value, int | float) and math.isfinite(float(value))
-            for value in numeric
+            isinstance(value, int | float) and math.isfinite(float(value)) for value in numeric
         )
         passed = bool(prediction.get("release_audit_passed")) and bool(
             label.get("release_audit_passed")

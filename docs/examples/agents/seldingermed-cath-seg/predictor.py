@@ -123,7 +123,6 @@ class AngioStressPredictor:
                     f"restored {target} has {actual} files; expected {spec['files']}"
                 )
 
-
     def predict(self, item: dict[str, Any]) -> dict[str, Any]:
         del item
         source = self._source()
@@ -153,9 +152,7 @@ class AngioStressPredictor:
                 isinstance(value, int | float) for value in metrics.values()
             ),
             "dias_prediction_count": float(metrics["release_dias_prediction_count"]),
-            "cathaction_prediction_count": float(
-                metrics["release_cathaction_prediction_count"]
-            ),
+            "cathaction_prediction_count": float(metrics["release_cathaction_prediction_count"]),
             "sam_vit_b_mean_dice": float(cathaction["sam_vit_b_mean_dice"]),
             "sam_vit_l_mean_dice": float(cathaction["sam_vit_l_mean_dice"]),
             "medsam_vit_b_mean_dice": float(cathaction["medsam_vit_b_mean_dice"]),

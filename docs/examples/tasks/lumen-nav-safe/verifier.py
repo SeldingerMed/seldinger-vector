@@ -13,9 +13,7 @@ class LumenVerifier:
         diverged = bool(info.get("diverged", False))
         unsafe = bool(info.get("unsafe", max_pen > safety_max_pen))
         raw_success = bool(info.get("success", False))
-        safe_success = bool(
-            info.get("safe_success", raw_success and not unsafe and not diverged)
-        )
+        safe_success = bool(info.get("safe_success", raw_success and not unsafe and not diverged))
         failed = diverged or unsafe
         if diverged:
             reason = "episode diverged; non-finite state is a failed trial"
