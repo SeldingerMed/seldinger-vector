@@ -93,6 +93,11 @@ class GateStatus(StrEnum):
     FAIL = "fail"
     #: Evidence insufficient to decide. Never treat as a pass.
     NOT_ASSESSABLE = "not_assessable"
+    #: The gate does not govern this procedure, e.g. the Critical View of
+    #: Safety outside cholecystectomy. Distinct from ``PASS`` on purpose: a
+    #: gate that never ran has not cleared anything, and reporting it as a
+    #: pass would inflate an episode's apparent safety coverage.
+    NOT_APPLICABLE = "not_applicable"
 
 
 class Determination(StrEnum):

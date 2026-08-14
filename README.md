@@ -35,6 +35,8 @@ plan and should not be relaxed without amending it.
 | Every artifact is versioned and chained | `audit.AuditTrail` | The record must be defensible under challenge (§7.3). |
 | Attestation requires bytes, not assertion | `deid.redact` | The pipeline hashes what its writer wrote; no caller supplies the digest. A status settable by assertion protects nothing (§8). |
 | Platform is data, never a branch | `domain.RobotPlatform` | Vendor-specific behaviour belongs in ingestion adapters only. |
+| Gates cannot collapse to a scalar | `scoring.SafetyGateSet` | `float()`, `int()` and `bool()` raise. Hard gates never average into soft scores (§7.1). |
+| A gate that cannot see cannot clear | `GateStatus.NOT_ASSESSABLE` | Missing or low-confidence evidence never reads as a pass. |
 
 ## Layout
 
@@ -45,6 +47,8 @@ src/or_audit/
   media/     frame access behind a FrameSource protocol
   ingest/    manifests into episodes; kinematics/video alignment
   deid/      detectors, policy, redaction plans, attestation
+  perception/ observation vocabulary and backend protocol
+  scoring/   deterministic hard safety gates
 docs/PLAN.md the product plan this implements
 ```
 
