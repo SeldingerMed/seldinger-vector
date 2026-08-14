@@ -101,11 +101,18 @@ class WorldSpec(_Frozen):
     world_pin: str = ""
     n_eval_episodes: Annotated[int, Field(ge=1, le=10_000)] = 30
     seed_policy: str = "deterministic-eval-30"
+    #: Relative to the task directory. video-predict labels the task author brought.
+    labels_path: str = ""
+    #: Relative to the task directory. AngioStress-shaped contract JSON.
+    contract_path: str = ""
 
     @model_validator(mode="after")
     def _gym_worlds_name_an_id(self) -> Self:
         if self.kind in {WorldKind.LUMEN_GYM, WorldKind.GYM} and not self.gym_id:
             msg = f"a {self.kind.value} world must name gym_id"
+            raise TaskContractError(msg)
+        if self.kind is WorldKind.ANGIOSTRESS_CONTRACT and not self.contract_path:
+            msg = "an angiostress-contract world must name contract_path"
             raise TaskContractError(msg)
         return self
 
@@ -295,6 +302,12 @@ class TaskSpec(_Frozen):
             msg = (
                 f"task {self.id} has no world_pin; a published row must pin the "
                 f"sim so it can replay (BUILD.md §1.3)"
+            )
+            raise TaskContractError(msg)
+        if self.port.id is PortId.VIDEO_PREDICT and not self.environment.labels_path:
+            msg = (
+                f"task {self.id} is video-predict but has no labels_path; "
+                f"the oracle is the labels the task author brought"
             )
             raise TaskContractError(msg)
 

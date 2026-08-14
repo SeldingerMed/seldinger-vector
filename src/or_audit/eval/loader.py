@@ -83,6 +83,19 @@ def load_dataset(path: Path | str) -> DatasetSpec:
     return spec
 
 
+def dataset_task_paths(path: Path | str) -> tuple[Path, ...]:
+    """Task directories listed by a dataset, resolved against the dataset root."""
+    dataset_path = Path(path).resolve()
+    root = dataset_path if dataset_path.is_dir() else dataset_path.parent
+    toml_path = root / "dataset.toml" if dataset_path.is_dir() else dataset_path
+    data = _read_toml(toml_path)
+    raw_tasks = data.get("tasks")
+    if not isinstance(raw_tasks, list) or not raw_tasks:
+        msg = f"dataset {toml_path} must list at least one task path"
+        raise TaskContractError(msg)
+    return tuple((root / str(entry)).resolve() for entry in raw_tasks)
+
+
 def _agent_root(path: Path) -> Path:
     resolved = path.resolve()
     if resolved.is_dir():

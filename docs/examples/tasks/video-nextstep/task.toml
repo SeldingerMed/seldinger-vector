@@ -19,8 +19,9 @@ class = "public"
 
 [environment]
 kind = "frame-source"
-n_eval_episodes = 1
+n_eval_episodes = 3
 seed_policy = "held-out-split"
+labels_path = "labels.json"
 
 [port]
 id = "video-predict"

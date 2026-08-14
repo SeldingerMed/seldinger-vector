@@ -1,0 +1,20 @@
+{
+  "items": [
+    {
+      "id": "clip-001",
+      "next_step": "advance",
+      "outcome": "continue",
+      "unsafe": false
+    },
+    {
+      "id": "clip-002",
+      "next_step": "withdraw",
+      "outcome": "abort",
+      "unsafe": true
+    },
+    {
+      "id": "clip-003",
+      "abstain": true
+    }
+  ]
+}

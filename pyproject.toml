@@ -21,6 +21,9 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
 ]
+lumen = [
+    "gymnasium>=0.29",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -82,3 +85,7 @@ plugins = ["pydantic.mypy"]
 module = "tests.*"
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
+
+[[tool.mypy.overrides]]
+module = ["lumen.*", "gymnasium.*"]
+ignore_missing_imports = true

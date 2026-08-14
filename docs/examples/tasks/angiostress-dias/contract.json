@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "benchmark_id": "angiostress-v0.1-seed",
+  "claim_boundary": "This contract defines a real-data-first benchmark surface and validates source/result availability. It is not a final construct-validity estimate, clinical validation, or model-improvement claim.",
+  "metric_schema": {
+    "required_metrics": ["dice", "cldice", "finite_metric_check"],
+    "primary_validation_metric": "contract_validation_passed"
+  }
+}

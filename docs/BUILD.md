@@ -177,10 +177,10 @@ Agent packages (Harbor’s Agent — identity is `org/name`):
 
 ## 4. Target CLI (Harbor verbs)
 
-P0 implements validate/describe only. Later packages fill the rest. Do not invent a different vocabulary.
+P0–P2 implement validate, bind, run, and replay. Later packages fill jobs-as-config, RL export, and the public registry. Do not invent a different vocabulary.
 
 ```bash
-# P0 — this package
+# P0 — contract
 or-audit tasks validate docs/examples/tasks/lumen-nav-safe
 or-audit tasks validate docs/examples/tasks/video-nextstep
 or-audit agents validate docs/examples/agents/seldingermed-cathmodel
@@ -188,17 +188,20 @@ or-audit bind docs/examples/tasks/lumen-nav-safe \
               docs/examples/agents/seldingermed-cathmodel
 or-audit datasets validate docs/examples/datasets/lumen-nav-v0
 
-# P1 — first real gym-policy eval (requires pinned Lumen)
-or-audit run -t docs/examples/tasks/lumen-nav-safe -a seldingermed/cathmodel --n 30
-or-audit run -d seldingermed/lumen-nav@0 -a seldingermed/cathmodel --n 30
-
-# P2 — first real video-predict eval (AngioStress, then anyone's corpus)
-or-audit run -d seldingermed/angiostress@0 -a seldingermed/cath-seg
-or-audit run -d acme/cabg-nextstep@0 -a acme/cabg-vlm
-
-# P3 — jobs, replay, RL export
-or-audit run -c job.toml
+# P1 — gym-policy. Pin world_pin in task.toml. CI uses a factory; live Lumen is optional.
+or-audit run -t docs/examples/tasks/lumen-nav-safe -a random --n 30 --out jobs/lumen-nav-safe
 or-audit replay jobs/lumen-nav-safe --expect-head <hash>
+
+# P2 — video-predict. Same verb; labels vs JSON. AngioStress requires the claim footer.
+or-audit run -t docs/examples/tasks/video-nextstep \
+         -a docs/examples/agents/example-video-predictor --out jobs/video-nextstep
+or-audit run -t docs/examples/tasks/angiostress-dias \
+         -a docs/examples/agents/seldingermed-cath-seg --out jobs/angiostress-dias
+or-audit run -d docs/examples/datasets/angiostress-v0 \
+         -a docs/examples/agents/seldingermed-cath-seg --out jobs/angiostress-v0
+
+# P3 — jobs-as-config, RL export
+or-audit run -c job.toml
 or-audit export-rl jobs/lumen-nav-safe --projection gated_reach_v0 --out rollouts.jsonl
 
 # P4 — registry (public): datasets *and* agents
@@ -433,4 +436,4 @@ C-SATS remains the prior for *surgeon scoring*. It is not the prior for this pla
 
 ## 10. Immediate next step
 
-P0 is in this repository: the types, the loader, both port seeds, `org/name` agents, bind, the CLI validate path. P1 is the first *runnable* gym-policy package. P2 is the first *runnable* video-predict package — the path that services an uploaded next-step model. Neither may require the other port’s fixture to be deleted.
+P1 and P2 are in this repository: `or-audit run` / `or-audit replay` for gym-policy (random + optional Lumen) and video-predict (labels vs JSON, AngioStress claim footer). Default CI does not import Newton. Next is P3 — job.toml, trajectories as an RL export, `gated_reach_v0` jsonl — then P4 the public `org/name` registry.

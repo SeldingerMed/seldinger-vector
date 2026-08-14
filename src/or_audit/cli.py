@@ -3,8 +3,8 @@
 ``demo`` / ``verify-audit`` / ``describe-rule``
     The original credentialing-mode tools. Still work; they are not the wedge.
 ``tasks validate`` / ``tasks describe`` / ``datasets validate`` /
-``agents validate`` / ``bind``
-    BUILD.md P0: load the Harbor-shaped eval contract without talking to Lumen.
+``agents validate`` / ``bind`` / ``run`` / ``replay``
+    BUILD.md P0-P2: Harbor-shaped eval contract, gym-policy and video-predict runners.
 
 Written against ``argparse`` rather than a CLI framework.
 """
@@ -22,8 +22,10 @@ from or_audit.decision.rule import DecisionRule
 from or_audit.demo import run_demo
 from or_audit.domain.enums import ThresholdOwner
 from or_audit.errors import AuditChainError, TaskContractError
+from or_audit.eval.agent import AgentPackage
 from or_audit.eval.bind import assert_bind
-from or_audit.eval.loader import load_agent, load_dataset, load_task
+from or_audit.eval.loader import dataset_task_paths, load_agent, load_dataset, load_task
+from or_audit.eval.runner import builtin_random_agent, replay_job, run_job
 from or_audit.version import PACKAGE_VERSION
 
 _DISCLAIMER = (
@@ -122,7 +124,11 @@ def _tasks_validate(args: argparse.Namespace) -> int:
     except TaskContractError as exc:
         print(f"INVALID: {exc}", file=sys.stderr)
         return 1
-    runnable = "runnable" if task.environment.world_pin else "valid (unpinned, not runnable)"
+    try:
+        task.assert_runnable()
+        runnable = "runnable"
+    except TaskContractError:
+        runnable = "valid (not runnable)"
     print(f"valid: {task.id}@{task.task_version} {runnable}")
     return 0
 
@@ -175,6 +181,71 @@ def _bind(args: argparse.Namespace) -> int:
         print(f"INCOMPATIBLE: {exc}", file=sys.stderr)
         return 1
     print(f"bind: {agent.id} -> {task.id} port={task.port.id.value}")
+    return 0
+
+
+def _resolve_agent(spec: str) -> tuple[AgentPackage, Path | None]:
+    if spec == "random":
+        return builtin_random_agent(), None
+    path = Path(spec)
+    return load_agent(path), path if path.is_dir() else path.parent
+
+
+def _run(args: argparse.Namespace) -> int:
+    """P1/P2: bind and run a task or dataset into a job directory."""
+    if bool(args.task) == bool(args.dataset):
+        print("run requires exactly one of -t/--task or -d/--dataset", file=sys.stderr)
+        return 2
+    try:
+        agent, agent_dir = _resolve_agent(args.agent)
+        n = args.n if args.n else None
+        if args.task:
+            task_path = Path(args.task)
+            task_dir = task_path if task_path.is_dir() else task_path.parent
+            result = run_job(
+                task=load_task(task_path),
+                task_dir=task_dir,
+                agent=agent,
+                agent_dir=agent_dir,
+                out=Path(args.out),
+                n=n,
+            )
+            print(f"ran: {result.task_id} n={result.n} head {result.head}")
+            return 0
+        load_dataset(Path(args.dataset))
+        out_root = Path(args.out)
+        for task_path in dataset_task_paths(Path(args.dataset)):
+            task = load_task(task_path)
+            task_dir = task_path if task_path.is_dir() else task_path.parent
+            result = run_job(
+                task=task,
+                task_dir=task_dir,
+                agent=agent,
+                agent_dir=agent_dir,
+                out=out_root / task.id,
+                n=n,
+            )
+            print(f"ran: {result.task_id} n={result.n} head {result.head}")
+        return 0
+    except TaskContractError as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 1
+
+
+def _replay(args: argparse.Namespace) -> int:
+    """Re-run a job and require the stored head to match."""
+    try:
+        result = replay_job(Path(args.path), load_task=load_task, load_agent=load_agent)
+    except TaskContractError as exc:
+        print(f"REPLAY FAILED: {exc}", file=sys.stderr)
+        return 1
+    if args.expect_head and args.expect_head != result.head:
+        print(
+            f"REPLAY FAILED: expected head {args.expect_head}, got {result.head}",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"replay matched: {result.task_id} head {result.head}")
     return 0
 
 
@@ -253,6 +324,25 @@ def build_parser() -> argparse.ArgumentParser:
     bind.add_argument("task", help="task directory or task.toml")
     bind.add_argument("agent", help="agent directory or agent.toml")
     bind.set_defaults(func=_bind)
+
+    run = sub.add_parser("run", help="evaluate an agent on a task or dataset")
+    run.add_argument("-t", "--task", help="task directory or task.toml")
+    run.add_argument("-d", "--dataset", help="dataset directory or dataset.toml")
+    run.add_argument("-a", "--agent", required=True, help="agent directory, or 'random'")
+    run.add_argument(
+        "-n",
+        "--n",
+        type=int,
+        default=0,
+        help="episodes (default: task n_eval_episodes)",
+    )
+    run.add_argument("--out", required=True, help="job output directory")
+    run.set_defaults(func=_run)
+
+    replay = sub.add_parser("replay", help="re-run a job and match its stored head")
+    replay.add_argument("path", help="job directory")
+    replay.add_argument("--expect-head", help="require this job head")
+    replay.set_defaults(func=_replay)
 
     return parser
 

@@ -37,6 +37,8 @@ class AgentPackage(BaseModel):
     kind: AgentKind
     weights_pin: str = ""
     entrypoint: str = ""
+    #: Relative to the agent directory. Frozen JSON predictions for P2.
+    predictions_path: str = ""
 
     @model_validator(mode="after")
     def _random_needs_no_weights(self) -> Self:

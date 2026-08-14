@@ -103,7 +103,13 @@ uv run or-audit agents validate docs/examples/agents/seldingermed-cathmodel
 uv run or-audit bind docs/examples/tasks/lumen-nav-safe \
                      docs/examples/agents/seldingermed-cathmodel
 uv run or-audit datasets validate docs/examples/datasets/lumen-nav-v0
+uv run or-audit run -t docs/examples/tasks/video-nextstep \
+    -a docs/examples/agents/example-video-predictor --out /tmp/or-audit-video
+uv run or-audit run -t docs/examples/tasks/angiostress-dias \
+    -a docs/examples/agents/seldingermed-cath-seg --out /tmp/or-audit-angio
 ```
+
+P1 gym-policy against live Lumen needs `world_pin` set and seldinger-lumen installed; `or-audit[lumen]` only adds gymnasium. Default tests inject a factory so Newton is not a CI dependency.
 
 CI runs lint, format check, mypy, and the test matrix on 3.11–3.13 with a
 coverage floor. All must pass before merge.

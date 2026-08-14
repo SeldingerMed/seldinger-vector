@@ -51,6 +51,7 @@ class TestExampleTaskLoads:
         [
             (EXAMPLE_TASK, "gym-policy"),
             (VIDEO_TASK, "video-predict"),
+            (ROOT / "docs" / "examples" / "tasks" / "angiostress-dias", "video-predict"),
         ],
     )
     def test_both_ports_have_a_loadable_seed(self, path: Path, port: str):

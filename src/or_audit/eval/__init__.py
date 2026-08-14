@@ -1,7 +1,7 @@
-"""Eval harness: Harbor-shaped tasks, datasets, agents, and trial vectors.
+"""Eval harness: Harbor-shaped tasks, datasets, agents, runners, and trial vectors.
 
-See ``docs/BUILD.md``. This package is P0 — types and loading. It does not
-talk to Lumen or run a policy.
+See ``docs/BUILD.md``. P0 is the contract. P1/P2 are ``run_job`` (gym-policy
+and video-predict). Lumen is optional at import time.
 """
 
 from __future__ import annotations
@@ -19,7 +19,9 @@ from or_audit.eval.enums import (
     SubjectKind,
     WorldKind,
 )
+from or_audit.eval.job import JobResult, assemble_job_result
 from or_audit.eval.loader import load_agent, load_dataset, load_task
+from or_audit.eval.runner import builtin_random_agent, replay_job, run_job
 from or_audit.eval.task import PortSpec, ProjectionSpec, TaskSpec
 from or_audit.eval.vector import TrialVector, project, vector_from_lumen_info
 
@@ -28,6 +30,7 @@ __all__ = [
     "AgentPackage",
     "AttestationLevel",
     "DatasetSpec",
+    "JobResult",
     "OracleKind",
     "PhiClass",
     "PortId",
@@ -38,10 +41,14 @@ __all__ = [
     "TaskSpec",
     "TrialVector",
     "WorldKind",
+    "assemble_job_result",
     "assert_bind",
+    "builtin_random_agent",
     "load_agent",
     "load_dataset",
     "load_task",
     "project",
+    "replay_job",
+    "run_job",
     "vector_from_lumen_info",
 ]
