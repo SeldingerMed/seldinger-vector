@@ -34,11 +34,33 @@ class PhiClass(StrEnum):
     PROHIBITED = "prohibited"
 
 
+class ProcedureFamily(StrEnum):
+    """What the task is *about*. Required, so the sandbox is not silently
+    an endovascular product that happens to live in a generic harness.
+
+    Lumen Layer 0 (continuum instrument in a deformable lumen) covers
+    ``endovascular`` *and* ``endoscopy``. Laparoscopy and robotic surgery
+    are different worlds (video, rigid tools, suturing sims). New families
+    are new datasets, not a new company.
+    """
+
+    ENDOVASCULAR = "endovascular"
+    ENDOSCOPY = "endoscopy"
+    LAPAROSCOPY = "laparoscopy"
+    ROBOTIC_SURGERY = "robotic-surgery"
+    OTHER = "other"
+
+
 class WorldKind(StrEnum):
-    """What Harbor would call the environment — the world, not the container."""
+    """What Harbor would call the environment — the world, not the container.
+
+    ``lumen-gym`` is the first physics adapter, not the only one.
+    """
 
     LUMEN_GYM = "lumen-gym"
     LUMEN_REPLAY = "lumen-replay"
+    #: Any Gymnasium env that is not Lumen (suturing sims, dVRK, …).
+    GYM = "gym"
     ANGIOSTRESS_CONTRACT = "angiostress-contract"
     FRAME_SOURCE = "frame-source"
 

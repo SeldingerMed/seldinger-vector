@@ -35,10 +35,30 @@ class TestExampleTaskLoads:
     def test_lumen_nav_safe_is_valid(self):
         task = load_task(EXAMPLE_TASK)
         assert task.id == "lumen-nav-safe"
+        assert task.metadata.family.value == "endovascular"
         assert task.verifier.headline == "safe_success"
         assert task.projection is not None
         assert task.projection.id.value == "gated_reach_v0"
         assert "safe success" in task.instruction.lower()
+
+    @pytest.mark.parametrize(
+        ("name", "family"),
+        [
+            ("lumen-nav-safe", "endovascular"),
+            ("endoscope-nav-safe", "endoscopy"),
+            ("chole-cvs-public", "laparoscopy"),
+            ("robotic-suture-throw", "robotic-surgery"),
+        ],
+    )
+    def test_every_procedure_family_has_a_loadable_fixture(self, name: str, family: str):
+        task = load_task(ROOT / "docs" / "examples" / "tasks" / name)
+        assert task.metadata.family.value == family
+
+    def test_family_is_required(self, tmp_path):
+        dest = _copy_task(tmp_path)
+        _patch_toml(dest / "task.toml", 'family = "endovascular"\n', "")
+        with pytest.raises(TaskContractError, match="family"):
+            load_task(dest)
 
     def test_task_toml_path_also_loads(self):
         assert load_task(EXAMPLE_TASK / "task.toml").id == "lumen-nav-safe"
@@ -60,6 +80,7 @@ class TestExampleTaskLoads:
     def test_describe_names_the_headline_and_refuses_human_det(self):
         text = load_task(EXAMPLE_TASK).describe()
         assert "headline   safe_success" in text
+        assert "family     endovascular" in text
         assert "human det. refused" in text
         assert "unpinned" in text
 

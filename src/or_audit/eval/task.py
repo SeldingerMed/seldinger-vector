@@ -24,6 +24,7 @@ from or_audit.eval.enums import (
     AttestationLevel,
     OracleKind,
     PhiClass,
+    ProcedureFamily,
     ProjectionId,
     SubjectKind,
     WorldKind,
@@ -43,9 +44,14 @@ class _Frozen(BaseModel):
 
 
 class TaskMetadata(_Frozen):
-    """Human-facing description. Not load-bearing."""
+    """What the task is about.
+
+    ``family`` is load-bearing: it is how a cholecystectomy task and a
+    guidewire task share a harness without one pretending to be the other.
+    """
 
     title: NonEmpty
+    family: ProcedureFamily
     modality: NonEmpty
     tags: tuple[str, ...] = ()
     safety_critical: bool = True
@@ -75,9 +81,9 @@ class WorldSpec(_Frozen):
     seed_policy: str = "deterministic-eval-30"
 
     @model_validator(mode="after")
-    def _lumen_has_gym_id(self) -> Self:
-        if self.kind is WorldKind.LUMEN_GYM and not self.gym_id:
-            msg = "a lumen-gym world must name gym_id (e.g. Lumen/NavTreeBranch-v0)"
+    def _gym_worlds_name_an_id(self) -> Self:
+        if self.kind in {WorldKind.LUMEN_GYM, WorldKind.GYM} and not self.gym_id:
+            msg = f"a {self.kind.value} world must name gym_id"
             raise TaskContractError(msg)
         return self
 
@@ -220,6 +226,7 @@ class TaskSpec(_Frozen):
         if self.oracle.kind is OracleKind.PHYSICS and self.environment.kind not in {
             WorldKind.LUMEN_GYM,
             WorldKind.LUMEN_REPLAY,
+            WorldKind.GYM,
         }:
             msg = (
                 f"task {self.id} claims a physics oracle but world kind is "
@@ -240,10 +247,13 @@ class TaskSpec(_Frozen):
 
         Validate-only tasks (no pin yet) are loadable. They are not runnable.
         """
-        if self.environment.kind is WorldKind.LUMEN_GYM and not self.environment.world_pin:
+        if (
+            self.environment.kind in {WorldKind.LUMEN_GYM, WorldKind.GYM}
+            and not self.environment.world_pin
+        ):
             msg = (
-                f"task {self.id} has no world_pin; P1 evals must pin a Lumen "
-                f"commit so a leaderboard row can replay"
+                f"task {self.id} has no world_pin; a published row must pin the "
+                f"sim so it can replay (BUILD.md §1.3)"
             )
             raise TaskContractError(msg)
 
@@ -257,6 +267,7 @@ class TaskSpec(_Frozen):
         metrics = ", ".join(m.id for m in self.verifier.metrics)
         return (
             f"Task {self.id}@{self.task_version} ({self.metadata.title})\n"
+            f"  family     {self.metadata.family.value}\n"
             f"  world      {self.environment.kind.value} {self.environment.gym_id} pin={pin}\n"
             f"  subject    {self.subject.kind.value}  phi={self.phi.class_.value}\n"
             f"  oracle     {self.oracle.kind.value}\n"

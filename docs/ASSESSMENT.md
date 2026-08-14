@@ -7,7 +7,7 @@
 This document exists because `PLAN.md` and the founding intent are not the same product.
 
 - `PLAN.md` is a **credentialing / QA attestation** thesis: sell a vendor-neutral score of *named surgeons* to hospitals and robot-platform challengers, under a legal wrapper a risk officer can hold.
-- The founding intent, restated against this repo, is an **eval environment and assessment layer for technical AI in medicine** — physical AI, image-conditioned decisions, world models, robotics — the thing Harbor and Prime Intellect are for coding agents, built for procedures instead of terminals.
+- The founding intent, restated against this repo, is an **eval environment and assessment layer for technical AI in medicine** — physical AI, image-conditioned decisions, world models, robotics — the thing Harbor and Prime Intellect are for coding agents, built for **every image-guided procedure** (lap chole, robotic suturing, endoscopy, endovascular, and in between), not for terminals and not only for Lumen.
 
 **Decision (2026-08-14): Future B is the wedge.** Build Harbor-for-medicine — niche eval / RL infrastructure for procedural medical AI and world models. Named-human credentialing (`PLAN.md`) stays a gated mode on the same rails and does not block this plan.
 

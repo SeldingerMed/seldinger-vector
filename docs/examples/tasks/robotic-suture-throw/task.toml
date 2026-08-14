@@ -1,0 +1,58 @@
+format_version = "1"
+id = "robotic-suture-throw"
+task_version = "0"
+
+[metadata]
+title = "Wall-safe robotic suture throw"
+family = "robotic-surgery"
+modality = "robotic-sim"
+tags = ["suturing", "anastomosis", "needle"]
+safety_critical = true
+
+[subject]
+kind = "policy"
+
+[phi]
+class = "procedural"
+
+[environment]
+# Not Lumen. Rigid-tool / needle gym (dVRK, commercial suturing sim, in-house).
+# The harness does not care which gym, only that it is pinned and vector-scored.
+kind = "gym"
+gym_id = "Suture/Throw-v0"
+world_pin = ""
+n_eval_episodes = 30
+seed_policy = "deterministic-eval-30"
+
+[agent]
+kinds = ["policy", "random", "vlm"]
+action_space = "bimanual_pose"
+timeout_sec = 180.0
+
+[oracle]
+kind = "physics"
+
+[verifier]
+abstain_ok = false
+headline = "safe_success"
+
+[[verifier.gates]]
+id = "tissue_injury"
+
+[[verifier.gates]]
+id = "needle_out_of_view"
+
+[[verifier.metrics]]
+id = "raw_success"
+
+[[verifier.metrics]]
+id = "safe_success"
+
+[[verifier.metrics]]
+id = "diverged"
+
+[attestation]
+level = "none"
+
+[decision]
+emit_human_determination = false

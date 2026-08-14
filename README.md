@@ -5,11 +5,13 @@ technical-AI evaluation.
 
 > **Status: v0.1 alpha.** Engineering scaffolding for a Harbor analog:
 > evaluate procedural medical agents in physics and image environments, with
-> a vector verifier that cannot hide injury inside a reach metric.
+> a vector verifier that cannot hide injury inside a reach metric. Lumen is
+> the first world, not the product: lap chole, robotic suturing, endoscopy,
+> and endovascular work all sit on the same task contract.
 >
-> - **Wedge (this is the product):** [`docs/BUILD.md`](docs/BUILD.md) — task
->   format, runner, datasets, RL projection, registry. First ship is Lumen
->   `safe_success` evals, then AngioStress, then image-conditioned agents.
+> - **Wedge (this is the product):** [`docs/BUILD.md`](docs/BUILD.md) — Harbor
+>   analog for *all* image-guided procedural eval. First *runnable* ship is
+>   Lumen `safe_success`; fixtures for the other families already load.
 > - **Gated mode:** [`docs/PLAN.md`](docs/PLAN.md) — named-surgeon
 >   credentialing. Phase 0 is **not** cleared and does **not** block the wedge.
 > - **Context:** [`docs/ASSESSMENT.md`](docs/ASSESSMENT.md) — straw-man /
@@ -26,10 +28,10 @@ intended: sim, public video, de-identified clinical video), runs it through
 hard safety gates and soft skill metrics that **cannot be averaged into each
 other**, and emits a versioned, contestable artifact.
 
-The product is the Harbor-shaped eval harness in `BUILD.md`. One later mode
-is independent scoring of robotic surgical video for credentialing bodies
-(`PLAN.md`). The v0.1 code is the kernel both use. `or-audit tasks validate`
-is the first Harbor verb that actually runs.
+The product is the Harbor-shaped eval harness in `BUILD.md`: a sandbox for
+technical AI on **every image-guided procedure**. Who the subject is (model vs
+surgeon) is a mode. Which procedure (wire, scope, lap chole, suture) is a
+dataset. `or-audit tasks validate` is the first Harbor verb that actually runs.
 
 The thesis that survives both readings is **not** "we can score robotic
 surgery" — vendors already do that — but that an independent *vector*
@@ -77,7 +79,8 @@ src/or_audit/
 docs/BUILD.md       Harbor-for-medicine build plan (the wedge)
 docs/PLAN.md        credentialing-mode spec (gated; does not block B)
 docs/ASSESSMENT.md  straw-man / steel-man and pre-deployment test layers
-docs/examples/      P0 fixtures: lumen-nav-safe task + lumen-nav-v0 dataset
+docs/examples/      P0 fixtures across families: endovascular, endoscopy,
+                    laparoscopy, robotic suturing
 ```
 
 ## Development
