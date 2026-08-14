@@ -354,14 +354,24 @@ def _require_attesting_policy(asset: MediaAsset, policy: DeidPolicy) -> None:
             f"records the trade, it does not remove the risk"
         )
         raise DeidentificationBoundaryError(msg)
-    if not policy.overlay_bound_validated_against:
+    validation = policy.overlay_bound_validation
+    if validation is None:
         msg = (
             f"policy cannot attest media {asset.id}: its overlay recall bound of "
             f"{policy.overlay_min_detectable_px}px has not been validated against "
             f"the capture hardware in scope (PLAN.md V-10, open). A fine grid is "
             f"an assumption about how thin real identifiers get, not a "
             f"measurement of it. Record the measurement in "
-            f"overlay_bound_validated_against, or analyse without attesting"
+            f"overlay_bound_validation, or analyse without attesting"
+        )
+        raise DeidentificationBoundaryError(msg)
+    if validation.measured_min_identifier_px < policy.overlay_min_detectable_px:
+        msg = (
+            f"policy cannot attest media {asset.id}: the recorded survey found "
+            f"identifiers as thin as {validation.measured_min_identifier_px}px, "
+            f"below this configuration's {policy.overlay_min_detectable_px}px "
+            f"recall bound, so the detector cannot be relied on to have found "
+            f"them. Lower overlay_block_px until the bound clears the measurement"
         )
         raise DeidentificationBoundaryError(msg)
 

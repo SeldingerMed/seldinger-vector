@@ -11,7 +11,7 @@ import math
 from enum import StrEnum
 from typing import Annotated, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from or_audit.errors import DeidentificationBoundaryError
 
@@ -33,6 +33,37 @@ from or_audit.errors import DeidentificationBoundaryError
 #: this ceiling. Until V-10 is answered for a given deployment, that deployment
 #: analyses; it does not attest.
 SAFE_OVERLAY_MIN_PX = 8
+
+
+class OverlayBoundValidation(BaseModel):
+    """A measurement discharging PLAN.md V-10 for one deployment.
+
+    Structured rather than free text, deliberately. An earlier version took a
+    citation string and checked only that it was non-empty, which meant three
+    spaces satisfied it -- and, once stripped, that ``"n/a"`` or a survey
+    reporting identifiers *thinner* than the recall bound would have satisfied
+    it too. A field whose content is never inspected is a field that records
+    intent rather than evidence.
+
+    Two values make the claim checkable: the thinnest identifier the survey
+    actually found, and where the survey came from.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: Thinnest burned-in identifier observed across the capture hardware in
+    #: scope, in pixels. Compared against the detector's recall bound.
+    measured_min_identifier_px: Annotated[int, Field(gt=0)]
+    #: Where the measurement came from: survey, ticket, report. Must say
+    #: something.
+    source: Annotated[str, StringConstraints(min_length=8, max_length=500)]
+
+    @model_validator(mode="after")
+    def _source_is_substantive(self) -> Self:
+        if not self.source.strip():
+            msg = "overlay bound validation source must not be blank"
+            raise DeidentificationBoundaryError(msg)
+        return self
 
 
 class AudioDisposition(StrEnum):
@@ -107,15 +138,15 @@ class DeidPolicy(BaseModel):
     #: It does not permit attestation -- see
     #: :attr:`guarantees_overlay_coverage`.
     overlay_recall_justification: str | None = None
-    #: Citation for the measurement establishing that every identifier this
-    #: capture pipeline burns in is thicker than
-    #: :attr:`overlay_min_detectable_px`. Required to attest.
+    #: The measurement establishing that every identifier this capture pipeline
+    #: burns in is thicker than :attr:`overlay_min_detectable_px`. Required to
+    #: attest.
     #:
     #: This is PLAN.md V-10 discharged for one deployment, and it is the only
     #: thing that turns the detector's recall bound from an assumption into a
     #: finding. There is no default: a deployment that has not measured its own
     #: capture hardware has not established coverage, however fine its grid.
-    overlay_bound_validated_against: str | None = None
+    overlay_bound_validation: OverlayBoundValidation | None = None
 
     @property
     def overlay_min_detectable_px(self) -> int:
@@ -132,11 +163,16 @@ class DeidPolicy(BaseModel):
     def guarantees_overlay_coverage(self) -> bool:
         """Whether this configuration may be used to attest.
 
-        Requires both a bound at or below :data:`SAFE_OVERLAY_MIN_PX` *and* a
-        recorded measurement backing it. Neither alone is enough: a fine grid
-        with no measurement is still an assumption about how thin real
-        identifiers get, and a measurement cannot rescue a grid coarser than
-        any identifier is likely to be.
+        Three conditions, all required:
+
+        * the recall bound sits at or below :data:`SAFE_OVERLAY_MIN_PX`;
+        * a measurement is recorded;
+        * and that measurement actually clears the bound.
+
+        The third matters as much as the second. A presence-only check treats
+        any populated field as evidence, so a survey reporting 3px identifiers
+        would have "validated" an 8px bound it plainly fails. The comparison is
+        the point of taking the measurement at all.
 
         A policy failing this is still useful -- triage, archive backfill,
         deciding what needs a finer pass -- but
@@ -144,8 +180,11 @@ class DeidPolicy(BaseModel):
         asset with it. Analysis and attestation are different claims, and this
         is the line between them.
         """
-        return self.overlay_min_detectable_px <= SAFE_OVERLAY_MIN_PX and bool(
-            self.overlay_bound_validated_against
+        validation = self.overlay_bound_validation
+        return (
+            self.overlay_min_detectable_px <= SAFE_OVERLAY_MIN_PX
+            and validation is not None
+            and validation.measured_min_identifier_px >= self.overlay_min_detectable_px
         )
 
     @model_validator(mode="after")

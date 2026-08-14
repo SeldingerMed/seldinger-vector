@@ -15,7 +15,7 @@ import pytest
 from or_audit.deid.detectors import detect_out_of_body
 from or_audit.deid.pipeline import analyze, redact
 from or_audit.deid.plan import PlannedSegment, RedactionPlan, apply_plan
-from or_audit.deid.policy import DeidPolicy
+from or_audit.deid.policy import DeidPolicy, OverlayBoundValidation
 from or_audit.deid.writer import NpzFrameWriter, WrittenOutput
 from or_audit.domain.entities import MediaAsset
 from or_audit.domain.enums import DeidStatus, MediaKind
@@ -29,7 +29,9 @@ FRAME_RATE = 30.0
 #: measurement (PLAN.md V-10), so the bare default cannot; tests that exercise
 #: the attestation mechanics rather than the gate itself use this.
 ATTESTING_POLICY = DeidPolicy(
-    overlay_bound_validated_against="test fixture: synthetic overlay 16px vs 8px bound"
+    overlay_bound_validation=OverlayBoundValidation(
+        measured_min_identifier_px=22, source="capture survey 2026-02"
+    )
 )
 
 
@@ -224,7 +226,9 @@ class TestRedactRequiresAnalysis:
             deid_status=DeidStatus.RAW,
         )
         validated = DeidPolicy(
-            overlay_bound_validated_against="test fixture: synthetic overlay 16px vs 8px bound"
+            overlay_bound_validation=OverlayBoundValidation(
+                measured_min_identifier_px=22, source="capture survey 2026-02"
+            )
         )
         analysed, plan = analyze(raw, source, validated)
         redact(
@@ -294,7 +298,9 @@ class TestWriterDigestIsNotTrusted:
             )
 
     POLICY = DeidPolicy(
-        overlay_bound_validated_against="test fixture: synthetic overlay 16px vs 8px bound"
+        overlay_bound_validation=OverlayBoundValidation(
+            measured_min_identifier_px=22, source="capture survey 2026-02"
+        )
     )
 
     def _analysed(self) -> tuple[MediaAsset, InMemoryFrameSource, RedactionPlan]:
@@ -761,7 +767,7 @@ class TestOverlayRecallBoundIsPolicedNotJustDocumented:
         """
         policy = DeidPolicy()
         assert policy.overlay_min_detectable_px == 8
-        assert policy.overlay_bound_validated_against is None
+        assert policy.overlay_bound_validation is None
         assert not policy.guarantees_overlay_coverage
 
     @pytest.mark.parametrize(("block", "fraction"), [(32, 0.5), (16, 1.0), (64, 0.25), (24, 0.5)])
@@ -842,7 +848,9 @@ class TestOverlayRecallBoundIsPolicedNotJustDocumented:
 
     def test_a_validated_default_policy_can_attest(self):
         assert DeidPolicy(
-            overlay_bound_validated_against="capture survey 2026-02: text >=22px"
+            overlay_bound_validation=OverlayBoundValidation(
+                measured_min_identifier_px=22, source="capture survey 2026-02"
+            )
         ).guarantees_overlay_coverage
 
     def test_validation_cannot_rescue_a_grid_above_the_ceiling(self):
@@ -850,7 +858,9 @@ class TestOverlayRecallBoundIsPolicedNotJustDocumented:
         policy = DeidPolicy(
             overlay_block_px=32,
             overlay_recall_justification="triage",
-            overlay_bound_validated_against="capture survey 2026-02: text >=22px",
+            overlay_bound_validation=OverlayBoundValidation(
+                measured_min_identifier_px=22, source="capture survey 2026-02"
+            ),
         )
         assert not policy.guarantees_overlay_coverage
 
@@ -867,7 +877,9 @@ class TestOverlayRecallBoundIsPolicedNotJustDocumented:
         )
         policy = DeidPolicy(
             overlay_block_px=8,
-            overlay_bound_validated_against="capture survey 2026-02: text >=22px",
+            overlay_bound_validation=OverlayBoundValidation(
+                measured_min_identifier_px=22, source="capture survey 2026-02"
+            ),
         )
         analysed, plan = analyze(asset, source, policy)
         assert plan.overlay_min_detectable_px == 4
@@ -929,11 +941,13 @@ class TestAttestationRequiresAMeasurementNotAnAssumption:
                 performed_by="deid-pipeline",
             )
         assert "V-10" in str(caught.value)
-        assert "overlay_bound_validated_against" in str(caught.value)
+        assert "overlay_bound_validation" in str(caught.value)
 
     def test_a_validated_policy_attests(self, tmp_path):
         validated = DeidPolicy(
-            overlay_bound_validated_against="capture survey 2026-02: text >=22px"
+            overlay_bound_validation=OverlayBoundValidation(
+                measured_min_identifier_px=22, source="capture survey 2026-02"
+            )
         )
         source = InMemoryFrameSource([in_body()] * 30, frame_rate=FRAME_RATE)
         analysed, plan = analyze(self._asset(), source, validated)
@@ -946,14 +960,16 @@ class TestAttestationRequiresAMeasurementNotAnAssumption:
             performed_by="deid-pipeline",
         )
         assert final.deid_status is DeidStatus.ATTESTED
-        assert (
-            attestation.summary()["overlay_bound_validated_against"]
-            == "capture survey 2026-02: text >=22px"
-        )
+        assert attestation.summary()["overlay_bound_measured_min_px"] == 22
+        assert attestation.summary()["overlay_bound_validation_source"] == "capture survey 2026-02"
 
     def test_the_attestation_carries_the_measurement_it_rests_on(self, tmp_path):
         """A reader must be able to see what the coverage claim is grounded in."""
-        validated = DeidPolicy(overlay_bound_validated_against="survey X")
+        validated = DeidPolicy(
+            overlay_bound_validation=OverlayBoundValidation(
+                measured_min_identifier_px=22, source="capture survey 2026-02"
+            )
+        )
         source = InMemoryFrameSource([in_body()] * 30, frame_rate=FRAME_RATE)
         analysed, plan = analyze(self._asset(), source, validated)
         _, attestation = redact(
@@ -966,4 +982,5 @@ class TestAttestationRequiresAMeasurementNotAnAssumption:
         )
         summary = attestation.summary()
         assert summary["overlay_min_detectable_px"] == 8
-        assert summary["overlay_bound_validated_against"] == "survey X"
+        assert summary["overlay_bound_measured_min_px"] == 22
+        assert summary["overlay_bound_validation_source"] == "capture survey 2026-02"

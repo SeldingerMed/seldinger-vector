@@ -25,7 +25,7 @@ import numpy as np
 from or_audit.audit.trail import Actor, ActorKind, AuditTrail
 from or_audit.decision.rule import DecisionRule
 from or_audit.deid.pipeline import analyze, redact
-from or_audit.deid.policy import DeidPolicy
+from or_audit.deid.policy import DeidPolicy, OverlayBoundValidation
 from or_audit.deid.writer import NpzFrameWriter
 from or_audit.domain.entities import Episode, Institution, Procedure, Surgeon
 from or_audit.domain.enums import Jurisdiction, SkillBand, ThresholdOwner
@@ -166,9 +166,12 @@ def run_demo(workdir: Path, *, episodes: int = 8) -> DemoOutcome:
         # generated below with a 16-pixel-tall overlay, so the recall bound is
         # measured rather than assumed. A real deployment must substitute its
         # own capture survey (PLAN.md V-10); it may not reuse this string.
-        overlay_bound_validated_against=(
-            "synthetic demo frames: overlay generated at 16px tall by "
-            "or_audit.demo.synthetic_source, versus an 8px recall bound"
+        overlay_bound_validation=OverlayBoundValidation(
+            measured_min_identifier_px=16,
+            source=(
+                "synthetic demo frames: overlay generated at 16px tall by "
+                "or_audit.demo.synthetic_source"
+            ),
         )
     )
 

@@ -17,7 +17,7 @@ from or_audit.audit.trail import Actor, ActorKind, AuditAction, AuditTrail
 from or_audit.deid.attestation import DeidAttestation
 from or_audit.deid.pipeline import analyze, default_disposition, discard, redact
 from or_audit.deid.plan import PlannedBox, PlannedSegment, RedactionPlan, apply_plan
-from or_audit.deid.policy import AudioDisposition, DeidPolicy
+from or_audit.deid.policy import AudioDisposition, DeidPolicy, OverlayBoundValidation
 from or_audit.deid.writer import NpzFrameWriter
 from or_audit.domain.entities import MediaAsset
 from or_audit.domain.enums import DeidStatus, MediaKind
@@ -40,7 +40,9 @@ def policy() -> DeidPolicy:
     covered in tests/test_deid_leaks.py.
     """
     return DeidPolicy(
-        overlay_bound_validated_against="test fixture: synthetic overlay 16px vs 8px bound"
+        overlay_bound_validation=OverlayBoundValidation(
+            measured_min_identifier_px=22, source="capture survey 2026-02"
+        )
     )
 
 
