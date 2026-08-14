@@ -40,6 +40,8 @@ plan and should not be relaxed without amending it.
 | ICC form is named, averaging refused | `metrics.icc_2_1` | An unqualified ICC is a family of numbers. Average-measures raises (§13). |
 | The agreement target is relative | `metrics.AgreementGate` | The panel is the ceiling; an absolute target either demands superhuman consistency or accepts noise. |
 | Binary proficiency is primary | `SkillScore` | GEARS alone is not a result (§13). |
+| The collapse is owned, not avoided | `decision.DecisionRule` | Credentialing ends in a binary act; if we don't collapse the vector every hospital invents its own (§7.2). |
+| Contestability ships with v1 | `decision.DecisionRecord` | Right of access, appeal, surfaced rater disagreement, right of response (§7.3). |
 
 ## Layout
 
@@ -53,6 +55,7 @@ src/or_audit/
   perception/ observation vocabulary and backend protocol
   scoring/   hard safety gates; binary proficiency and GEARS
   metrics/   ICC(2,1), Fleiss kappa, the section 13 agreement gate
+  decision/  pre-registered decision rule, contestation, disclosure
 docs/PLAN.md the product plan this implements
 ```
 
