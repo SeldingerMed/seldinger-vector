@@ -1,0 +1,10 @@
+format_version = "1"
+id = "video-nextstep-v0"
+dataset_version = "0"
+headline = "next_step_correct"
+phi_class = "public"
+description = "Seed video-predict dataset. Procedure and label names are the task author's. Headline is next_step_correct; abstention is a legal outcome."
+
+tasks = [
+    "../../tasks/video-nextstep",
+]

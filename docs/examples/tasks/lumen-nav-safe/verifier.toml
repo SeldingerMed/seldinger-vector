@@ -1,0 +1,6 @@
+# RL projection only. The leaderboard reads the vector, not this file.
+# See docs/BUILD.md §4 and §6 P3.
+
+[projection]
+id = "gated_reach_v0"
+version = "0"

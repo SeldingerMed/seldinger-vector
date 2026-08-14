@@ -1,0 +1,183 @@
+"""Job directory: the Harbor trial/job layout, with a vector instead of reward.txt."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Annotated, Any, Self
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from or_audit.audit.canonical import digest
+from or_audit.errors import TaskContractError
+from or_audit.eval.agent import AgentPackage
+from or_audit.eval.enums import WorldKind
+from or_audit.eval.task import TaskSpec
+from or_audit.eval.vector import TrialVector
+
+
+class TrialRecord(BaseModel):
+    """One trial on disk."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    seed: Annotated[int, Field(ge=0)]
+    vector: TrialVector
+    trajectory: tuple[dict[str, Any], ...] = ()
+    projection: float | None = None
+
+
+class JobResult(BaseModel):
+    """Aggregated job. Never a lone mean-reward."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    task_id: str
+    task_version: str
+    agent_identity: str
+    world_pin: str
+    n: Annotated[int, Field(ge=1)]
+    headline: str
+    trials: tuple[TrialRecord, ...]
+    headline_true: int
+    headline_false: int
+    headline_unassessable: int
+    any_gate_failed: int
+    claim_footer: str = ""
+    head: str = ""
+
+    @model_validator(mode="after")
+    def _counts_match(self) -> Self:
+        if len(self.trials) != self.n:
+            msg = f"job n={self.n} but {len(self.trials)} trials"
+            raise TaskContractError(msg)
+        return self
+
+
+def agent_identity(agent: AgentPackage) -> str:
+    """Stable identity for a trial row."""
+    pin = agent.weights_pin or "none"
+    return f"{agent.id}@{agent.agent_version}+{pin}"
+
+
+def _vector_dict(vector: TrialVector) -> dict[str, Any]:
+    return vector.model_dump(mode="json")
+
+
+def job_head_payload(result: JobResult) -> dict[str, Any]:
+    """The bytes that define replay identity. Excludes ``head`` itself."""
+    dumped = result.model_dump(mode="json")
+    dumped.pop("head", None)
+    return dumped
+
+
+def compute_head(result: JobResult) -> str:
+    """SHA-256 of the canonical job payload."""
+    return digest(job_head_payload(result))
+
+
+def assert_publishable(
+    task: TaskSpec,
+    trials: tuple[TrialRecord, ...],
+    claim_footer: str,
+) -> None:
+    """Refuse a result that would hide injury or drop the AngioStress claim boundary."""
+    metric_ids = {m.id for m in task.verifier.metrics}
+    if "safe_success" in metric_ids:
+        for trial in trials:
+            if trial.vector.metric("safe_success") is None:
+                msg = (
+                    "refusing to publish a result that omits safe_success; "
+                    "that is the CathSim failure mode BUILD.md forbids"
+                )
+                raise TaskContractError(msg)
+    if task.environment.kind is WorldKind.ANGIOSTRESS_CONTRACT and not claim_footer:
+        msg = (
+            "refusing to publish an AngioStress result without the claim footer; "
+            "BUILD.md P2 treats a missing boundary as an invalid scorecard"
+        )
+        raise TaskContractError(msg)
+
+
+def assemble_job_result(
+    *,
+    task: TaskSpec,
+    agent: AgentPackage,
+    trials: tuple[TrialRecord, ...],
+    claim_footer: str = "",
+) -> JobResult:
+    """Build a publishable job result and stamp its head."""
+    assert_publishable(task, trials, claim_footer)
+    headline_true = 0
+    headline_false = 0
+    headline_unassessable = 0
+    gate_failed = 0
+    for trial in trials:
+        value = trial.vector.headline.value
+        if value is None:
+            headline_unassessable += 1
+        elif value is True or (isinstance(value, int | float) and value != 0):
+            headline_true += 1
+        else:
+            headline_false += 1
+        if trial.vector.any_gate_failed:
+            gate_failed += 1
+    result = JobResult(
+        task_id=task.id,
+        task_version=task.task_version,
+        agent_identity=agent_identity(agent),
+        world_pin=task.environment.world_pin,
+        n=len(trials),
+        headline=task.verifier.headline,
+        trials=trials,
+        headline_true=headline_true,
+        headline_false=headline_false,
+        headline_unassessable=headline_unassessable,
+        any_gate_failed=gate_failed,
+        claim_footer=claim_footer,
+    )
+    return result.model_copy(update={"head": compute_head(result)})
+
+
+def write_job(out: Path, *, config: dict[str, Any], result: JobResult) -> None:
+    """Write a Harbor-shaped job directory."""
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "config.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    (out / "result.json").write_text(
+        json.dumps(result.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8"
+    )
+    for trial in result.trials:
+        trial_dir = out / f"trial-{result.task_id}-{trial.seed}"
+        trial_dir.mkdir(parents=True, exist_ok=True)
+        (trial_dir / "result.json").write_text(
+            json.dumps(_vector_dict(trial.vector), indent=2) + "\n", encoding="utf-8"
+        )
+        (trial_dir / "trajectory.json").write_text(
+            json.dumps(list(trial.trajectory), indent=2) + "\n", encoding="utf-8"
+        )
+        if trial.projection is not None:
+            (trial_dir / "projection.json").write_text(
+                json.dumps({"projection": trial.projection}) + "\n", encoding="utf-8"
+            )
+
+
+def read_job_result(out: Path) -> JobResult:
+    """Load ``result.json`` from a job directory."""
+    path = out / "result.json"
+    if not path.is_file():
+        msg = f"missing result.json in {out}"
+        raise TaskContractError(msg)
+    return JobResult.model_validate(json.loads(path.read_text(encoding="utf-8")))
+
+
+def read_job_config(out: Path) -> dict[str, Any]:
+    """Load ``config.json`` from a job directory."""
+    path = out / "config.json"
+    if not path.is_file():
+        msg = f"missing config.json in {out}"
+        raise TaskContractError(msg)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        msg = f"config.json in {out} is not an object"
+        raise TaskContractError(msg)
+    return data

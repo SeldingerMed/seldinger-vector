@@ -1,0 +1,56 @@
+format_version = "1"
+id = "angiostress-dias"
+task_version = "0"
+
+[metadata]
+title = "AngioStress DIAS contract (seed)"
+modality = "dsa-video"
+tags = ["angiostress", "dias", "video-predict"]
+safety_critical = true
+
+[subject]
+kind = "model"
+
+[phi]
+class = "public"
+
+[environment]
+kind = "angiostress-contract"
+n_eval_episodes = 2
+seed_policy = "contract-items"
+labels_path = "labels.json"
+contract_path = "contract.json"
+
+[port]
+id = "video-predict"
+observation = "dsa-sequence"
+prediction = "mask"
+
+[agent]
+kinds = ["frozen-model"]
+timeout_sec = 600.0
+
+[oracle]
+kind = "contract"
+
+[verifier]
+abstain_ok = false
+headline = "contract_validation_passed"
+
+[[verifier.gates]]
+id = "finite_metric_check"
+
+[[verifier.metrics]]
+id = "contract_validation_passed"
+
+[[verifier.metrics]]
+id = "dice"
+
+[[verifier.metrics]]
+id = "cldice"
+
+[attestation]
+level = "none"
+
+[decision]
+emit_human_determination = false

@@ -1,0 +1,59 @@
+format_version = "1"
+id = "video-nextstep"
+task_version = "0"
+
+[metadata]
+title = "Next-step / outcome prediction on held-out procedural video"
+modality = "procedural-video"
+# Tags are search, not a kernel taxonomy. A CABG corpus, a cath corpus, or
+# anything else is the same port. The task author names the procedure here
+# if they want; the harness does not switch on it.
+tags = ["video", "next-step", "outcome"]
+safety_critical = true
+
+[subject]
+kind = "model"
+
+[phi]
+class = "public"
+
+[environment]
+kind = "frame-source"
+n_eval_episodes = 3
+seed_policy = "held-out-split"
+labels_path = "labels.json"
+
+[port]
+id = "video-predict"
+observation = "video-clip"
+# Open slug: the label schema travels with the dataset, not in this kernel.
+prediction = "next-step"
+
+[agent]
+kinds = ["frozen-model", "vlm"]
+timeout_sec = 600.0
+
+[oracle]
+kind = "contract"
+
+[verifier]
+abstain_ok = true
+headline = "next_step_correct"
+
+[[verifier.gates]]
+id = "unsafe_prediction"
+
+[[verifier.metrics]]
+id = "next_step_correct"
+
+[[verifier.metrics]]
+id = "outcome_correct"
+
+[[verifier.metrics]]
+id = "abstained"
+
+[attestation]
+level = "none"
+
+[decision]
+emit_human_determination = false

@@ -1,0 +1,18 @@
+{
+  "items": [
+    {
+      "id": "dias-s40",
+      "dice": 0.71,
+      "cldice": 0.64,
+      "finite_metric_check": true,
+      "contract_validation_passed": true
+    },
+    {
+      "id": "dias-s41",
+      "dice": 0.55,
+      "cldice": 0.48,
+      "finite_metric_check": true,
+      "contract_validation_passed": true
+    }
+  ]
+}

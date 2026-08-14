@@ -1,7 +1,7 @@
 [project]
 name = "or-audit"
 version = "0.1.0a0"
-description = "Vendor-neutral robotic surgical skill and safety attestation platform"
+description = "Eval harness for procedural medical AI (Harbor analog): vector verifier, tasks, datasets"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "UNLICENSED" }
@@ -20,6 +20,9 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.6",
     "mypy>=1.11",
+]
+lumen = [
+    "gymnasium>=0.29",
 ]
 
 [build-system]
@@ -82,3 +85,7 @@ plugins = ["pydantic.mypy"]
 module = "tests.*"
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
+
+[[tool.mypy.overrides]]
+module = ["lumen.*", "gymnasium.*"]
+ignore_missing_imports = true

@@ -1,25 +1,45 @@
 # OR-Audit
 
-Vendor-neutral robotic surgical skill and safety attestation.
+Vector verifier and attestation kernel for procedural skill, safety, and
+technical-AI evaluation.
 
-> **Status: v0.1 alpha, pre-Phase-0.** This is engineering scaffolding for the
-> product described in [`docs/PLAN.md`](docs/PLAN.md). The plan's Phase 0 gates
-> — demand, legal holdability, annotation economics, data rights — are **not
-> cleared**, and several load-bearing claims are open verification items
-> (`PLAN.md` section V). Nothing here should be read as a validated product or
-> as legal, regulatory, or clinical advice.
+> **Status: v0.1 alpha.** Engineering scaffolding for a Harbor analog:
+> evaluate procedural medical agents in physics and image environments, with
+> a vector verifier that cannot hide injury inside a reach metric. Evals are
+> infinite: we do not enumerate procedures. We bind `org/name` agents to
+> tasks by **port** (`gym-policy` or `video-predict`) and run them.
+>
+> - **Wedge (this is the product):** [`docs/BUILD.md`](docs/BUILD.md) — Harbor
+>   analog. Same verb for `seldingermed/cathmodel` and an uploaded CABG
+>   next-step VLM. First *runnable* ship is Lumen `safe_success`.
+> - **Gated mode:** [`docs/PLAN.md`](docs/PLAN.md) — named-surgeon
+>   credentialing. Phase 0 is **not** cleared and does **not** block the wedge.
+> - **Context:** [`docs/ASSESSMENT.md`](docs/ASSESSMENT.md) — straw-man /
+>   steel-man and pre-deployment test layers.
+>
+> Kernel invariants (no scalar collapse, required abstention, de-id as a gate,
+> pinned audit chain) are shared. Nothing here is a validated product or
+> legal, regulatory, or clinical advice.
 
 ## What this is
 
-A platform that takes robotic surgical video, evaluates it against published
-safety and skill rubrics, and emits an attestation artifact a credentialing
-body can actually hold.
+A harness that takes a procedural episode (today: synthetic endoscopic video;
+intended: sim, public video, de-identified clinical video), runs it through
+hard safety gates and soft skill metrics that **cannot be averaged into each
+other**, and emits a versioned, contestable artifact.
 
-The thesis is **not** "we can score robotic surgery" — the robot vendors are
-already doing that. It is that an *independent* score is worth paying for
-precisely because a manufacturer's score of performance on its own robot is
-structurally conflicted, is confined to one platform, and cannot serve as
-third-party evidence. See `PLAN.md` sections 1 and 4.
+The product is the Harbor-shaped eval harness in `BUILD.md`: a sandbox that
+services submitted `(dataset, agent)` pairs. Who the subject is (model vs
+surgeon) is a mode. Which procedure is **not** a kernel type — it is whatever
+task someone published. `or-audit bind` is the first Harbor verb that decides
+whether `seldingermed/cathmodel` and `acme/cabg-vlm` can even be scored on a
+given task.
+
+The thesis that survives both readings is **not** "we can score robotic
+surgery" — vendors already do that — but that an independent *vector*
+verifier, able to abstain, is worth paying for when self-issued scores are
+structurally conflicted. Who the subject is (surgeon vs policy) is a mode,
+not a rewrite.
 
 ## Architectural commitments
 
@@ -30,7 +50,7 @@ plan and should not be relaxed without amending it.
 |---|---|---|
 | Video is required; kinematics never blocks | `domain.Episode` | Kinematics is vendor-gated (V-1). A cross-platform scorer cannot depend on a signal controlled by the parties it competes with. |
 | De-identification is a gate, not a flag | `domain.MediaAsset.require_readable` | Only attested media may reach perception, scoring, reporting, or export (§8). |
-| The score vector never implicitly collapses | `scoring` (later phase) | Hard safety gates must not average into soft skill scores (§7.1). |
+| The score vector never implicitly collapses | `scoring.ScoreVector` | Hard safety gates must not average into soft skill scores (§7.1). |
 | Abstention is a required output class | `Determination.INDETERMINATE`, `GateStatus.NOT_ASSESSABLE` | A scorer that cannot decline gets forced into false confidence where liability concentrates (§7.2). |
 | Every artifact is versioned and chained | `audit.AuditTrail` | The record must be defensible under challenge (§7.3). |
 | Attestation requires bytes, not assertion | `deid.redact` | The pipeline hashes what its writer wrote; no caller supplies the digest. A status settable by assertion protects nothing (§8). |
@@ -48,6 +68,7 @@ plan and should not be relaxed without amending it.
 
 ```
 src/or_audit/
+  eval/      Harbor-shaped tasks, datasets, trial vectors (BUILD.md P0)
   domain/    entities, closed vocabularies, invariants (no I/O)
   audit/     canonical serialization, tamper-evident append-only trail
   media/     frame access behind a FrameSource protocol
@@ -57,7 +78,10 @@ src/or_audit/
   scoring/   hard safety gates; binary proficiency and GEARS
   metrics/   ICC(2,1), Fleiss kappa, the section 13 agreement gate
   decision/  pre-registered decision rule, contestation, disclosure
-docs/PLAN.md the product plan this implements
+docs/BUILD.md       Harbor-for-medicine build plan (the wedge)
+docs/PLAN.md        credentialing-mode spec (gated; does not block B)
+docs/ASSESSMENT.md  straw-man / steel-man and pre-deployment test layers
+docs/examples/      seed fixtures: gym-policy + video-predict, org/name agents
 ```
 
 ## Development
@@ -72,7 +96,26 @@ uv run pytest              # tests
 uv run ruff check .        # lint
 uv run ruff format .       # format
 uv run mypy                # types
+
+uv run or-audit tasks validate docs/examples/tasks/lumen-nav-safe
+uv run or-audit tasks validate docs/examples/tasks/video-nextstep
+uv run or-audit agents validate docs/examples/agents/seldingermed-cathmodel
+uv run or-audit bind docs/examples/tasks/lumen-nav-safe \
+                     docs/examples/agents/seldingermed-cathmodel
+uv run or-audit datasets validate docs/examples/datasets/lumen-nav-v0
+uv run or-audit run -t docs/examples/tasks/video-nextstep \
+    -a docs/examples/agents/example-video-predictor --out /tmp/or-audit-video
+uv run or-audit run -t docs/examples/tasks/angiostress-dias \
+    -a docs/examples/agents/seldingermed-cath-seg --out /tmp/or-audit-angio
+uv run or-audit run -c docs/examples/jobs/lumen-nav-random -n 2 \
+    --out /tmp/or-audit-job
+uv run or-audit export-rl /tmp/or-audit-job --projection gated_reach_v0 \
+    --out /tmp/rollouts.jsonl
 ```
+
+`run -c` is the cartesian product of agents × tasks in `job.toml`. `export-rl` writes a versioned projection jsonl for RL; the leaderboard still reads the vector. Homemade projection ids are refused. The in-tree `lumen-nav-safe` task is valid but unpinned — set `world_pin` (tests inject a factory) before a live gym run.
+
+P1 gym-policy against live Lumen needs `world_pin` set and seldinger-lumen installed; `or-audit[lumen]` only adds gymnasium. Default tests inject a factory so Newton is not a CI dependency.
 
 CI runs lint, format check, mypy, and the test matrix on 3.11–3.13 with a
 coverage floor. All must pass before merge.

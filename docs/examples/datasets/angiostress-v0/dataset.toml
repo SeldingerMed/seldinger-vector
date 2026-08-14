@@ -1,0 +1,10 @@
+format_version = "1"
+id = "angiostress-v0"
+dataset_version = "0"
+headline = "contract_validation_passed"
+phi_class = "public"
+description = "Seed video-predict dataset on the AngioStress contract. Headline is contract_validation_passed. A result without the claim footer is invalid."
+
+tasks = [
+    "../../tasks/angiostress-dias",
+]

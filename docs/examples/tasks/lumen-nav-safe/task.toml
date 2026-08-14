@@ -1,0 +1,68 @@
+format_version = "1"
+id = "lumen-nav-safe"
+task_version = "0"
+
+[metadata]
+title = "Wall-safe branch navigation"
+modality = "endovascular-sim"
+tags = ["lumen", "navigation", "safety"]
+safety_critical = true
+
+[subject]
+kind = "policy"
+
+[phi]
+class = "procedural"
+
+[environment]
+kind = "lumen-gym"
+gym_id = "Lumen/NavTreeBranch-v0"
+# P1 must pin a Lumen commit. Empty means the task is valid but not runnable.
+world_pin = ""
+n_eval_episodes = 30
+seed_policy = "deterministic-eval-30"
+
+[port]
+id = "gym-policy"
+observation = "gym-obs"
+action = "insertion_twist"
+
+[agent]
+kinds = ["policy", "random"]
+action_space = "insertion_twist"
+timeout_sec = 120.0
+
+[oracle]
+kind = "physics"
+
+[verifier]
+abstain_ok = false
+headline = "safe_success"
+
+[[verifier.gates]]
+id = "wall_penetration"
+source = "lumen.info.max_pen"
+fail_when = "max_pen > safety_max_pen"
+maps_to = "unsafe"
+
+[[verifier.metrics]]
+id = "raw_success"
+source = "lumen.info.success"
+
+[[verifier.metrics]]
+id = "safe_success"
+source = "lumen.info.safe_success"
+
+[[verifier.metrics]]
+id = "diverged"
+source = "lumen.info.diverged"
+
+[[verifier.metrics]]
+id = "max_pen"
+source = "lumen.info.max_pen"
+
+[attestation]
+level = "none"
+
+[decision]
+emit_human_determination = false
