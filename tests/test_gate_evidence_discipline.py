@@ -367,10 +367,39 @@ class TestDeidBoundaryIsLoadBearingAtScoringTime:
     def test_matching_result_verifies(self):
         verify_binding(result(), episode_for())
 
-    def test_mismatched_media_digest_is_refused(self, chole):
-        out = result(media_sha256=("f" * 64,))
-        with pytest.raises(DeidentificationBoundaryError, match="do not match episode"):
+    def test_foreign_media_digest_is_refused(self, chole):
+        out = result(media_sha256=(MEDIA_SHA, "f" * 64))
+        with pytest.raises(DeidentificationBoundaryError, match="not cleared media"):
             evaluate_all(out, episode_for(), chole)
+
+    def test_omitting_a_video_is_refused(self, chole):
+        """A verdict must rest on all the video it claims to assess."""
+        second = "b" * 64
+        episode_id = new_episode_id()
+        two_videos = Episode(
+            id=episode_id,
+            institution_id=new_institution_id(),
+            procedure_id=new_procedure_id(),
+            surgeon_id=new_surgeon_id(),
+            system_id=new_system_id(),
+            band_at_episode=SkillBand.ATTENDING,
+            performed_at=datetime(2026, 3, 4, 14, 30, tzinfo=UTC),
+            media=tuple(
+                MediaAsset(
+                    id=new_media_asset_id(),
+                    episode_id=episode_id,
+                    kind=MediaKind.ENDOSCOPIC_VIDEO,
+                    raw_uri="file:///deid/x.npz",
+                    sha256=digest,
+                    duration_seconds=900.0,
+                    deid_status=DeidStatus.ATTESTED,
+                    deid_attestation_sha256=attestation,
+                )
+                for digest, attestation in ((MEDIA_SHA, ATTESTATION_SHA), (second, "c" * 64))
+            ),
+        )
+        with pytest.raises(DeidentificationBoundaryError, match="omits endoscopic video"):
+            evaluate_all(result(), two_videos, chole)
 
     def test_mismatched_attestation_digest_is_refused(self, chole):
         out = result(deid_attestation_sha256=("e" * 64,))

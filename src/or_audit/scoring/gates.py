@@ -461,23 +461,46 @@ def verify_binding(result: PerceptionResult, episode: Episode) -> None:
             result's media or attestation digests do not match it.
     """
     episode.require_readable()
-    video = tuple(a for a in episode.readable_media if a.kind is MediaKind.ENDOSCOPIC_VIDEO)
-    expected_media = {a.sha256 for a in video}
-    expected_attestations = {
-        a.deid_attestation_sha256 for a in video if a.deid_attestation_sha256 is not None
-    }
+    cleared = episode.readable_media
+    video = tuple(a for a in cleared if a.kind is MediaKind.ENDOSCOPIC_VIDEO)
 
-    if set(result.media_sha256) != expected_media:
+    claimed_media = set(result.media_sha256)
+    cleared_media = {a.sha256 for a in cleared}
+    required_video = {a.sha256 for a in video}
+
+    # Subset on one side, superset on the other. Every claimed digest must be
+    # cleared media of this episode, so nothing foreign can be scored; and
+    # every endoscopic video must be claimed, so no video can be quietly left
+    # out of the material a verdict is said to rest on. Subset rather than
+    # equality on the first half lets a backend that also reads kinematics
+    # bind it without loosening anything.
+    unknown = claimed_media - cleared_media
+    if unknown:
         msg = (
-            f"perception result from {result.identity} names media digests that do "
-            f"not match episode {episode.id}; a result may only be scored against "
-            f"the episode it was computed from"
+            f"perception result from {result.identity} names media digests that are "
+            f"not cleared media of episode {episode.id}; a result may only be scored "
+            f"against the episode it was computed from"
         )
         raise DeidentificationBoundaryError(msg)
-    if set(result.deid_attestation_sha256) != expected_attestations:
+    if not required_video <= claimed_media:
+        msg = (
+            f"perception result from {result.identity} omits endoscopic video of "
+            f"episode {episode.id}; a verdict must rest on all of the video it "
+            f"claims to assess"
+        )
+        raise DeidentificationBoundaryError(msg)
+
+    claimed_attestations = set(result.deid_attestation_sha256)
+    expected_attestations = {
+        a.deid_attestation_sha256
+        for a in cleared
+        if a.sha256 in claimed_media and a.deid_attestation_sha256 is not None
+    }
+    if claimed_attestations != expected_attestations:
         msg = (
             f"perception result from {result.identity} names de-identification "
-            f"attestations that do not match episode {episode.id}"
+            f"attestations that do not match the media it claims for episode "
+            f"{episode.id}"
         )
         raise DeidentificationBoundaryError(msg)
 
