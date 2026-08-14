@@ -23,6 +23,9 @@ coverage.xml
 .idea/
 .vscode/
 
+# Agent tool state
+.opencode/
+
 # Local data. Surgical media must never enter version control.
 /data/
 /scratch/

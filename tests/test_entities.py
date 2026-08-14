@@ -39,7 +39,7 @@ class TestVideoIsRequiredKinematicsIsNot:
     """Section 7: video is the common denominator; kinematics never blocks."""
 
     def test_episode_without_endoscopic_video_is_rejected(self, make_episode):
-        with pytest.raises(DomainInvariantError, match="no endoscopic video"):
+        with pytest.raises(DomainInvariantError, match="no surviving endoscopic video"):
             make_episode(media_for=lambda eid: (make_media(eid, MediaKind.KINEMATICS),))
 
     def test_kinematics_only_episode_is_rejected_even_though_richer(self, make_episode):
@@ -117,7 +117,7 @@ class TestDeidentificationGate:
                 id=new_media_asset_id(),
                 episode_id=new_episode_id(),
                 kind=MediaKind.ENDOSCOPIC_VIDEO,
-                uri="s3://x/a.mp4",
+                raw_uri="s3://x/a.mp4",
                 sha256=sha("a"),
                 deid_status=DeidStatus.ATTESTED,
             )
@@ -128,7 +128,7 @@ class TestDeidentificationGate:
                 id=new_media_asset_id(),
                 episode_id=new_episode_id(),
                 kind=MediaKind.ENDOSCOPIC_VIDEO,
-                uri="s3://x/a.mp4",
+                raw_uri="s3://x/a.mp4",
                 sha256=sha("a"),
                 deid_status=DeidStatus.RAW,
                 deid_attestation_sha256=sha("att"),
@@ -167,6 +167,101 @@ class TestAggregateDeidStatus:
             )
         )
         assert built.deid_status is DeidStatus.FAILED
+
+
+class TestDiscardedMedia:
+    """Section 8 makes discarding audio the default disposition.
+
+    A discarded asset must be a terminal, non-blocking state. If it were
+    treated like RAW or FAILED, following the plan's own default would
+    permanently brick the episode, since assets and episodes are frozen.
+    """
+
+    def test_discarded_audio_does_not_block_the_episode(self, make_episode):
+        built = make_episode(
+            media_for=lambda eid: (
+                make_media(eid, MediaKind.ENDOSCOPIC_VIDEO, tag="v"),
+                make_media(eid, MediaKind.AUDIO, deid=DeidStatus.DISCARDED, tag="a"),
+            )
+        )
+        built.require_readable()
+        assert built.deid_status is DeidStatus.ATTESTED
+
+    def test_discarded_media_is_not_present_and_not_readable(self, make_episode):
+        built = make_episode(
+            media_for=lambda eid: (
+                make_media(eid, MediaKind.ENDOSCOPIC_VIDEO, tag="v"),
+                make_media(eid, MediaKind.AUDIO, deid=DeidStatus.DISCARDED, tag="a"),
+            )
+        )
+        discarded = built.discarded_media
+        assert len(discarded) == 1
+        assert discarded[0].is_present is False
+        assert discarded[0].is_readable is False
+
+    def test_discarded_media_excluded_from_readable_set(self, make_episode):
+        built = make_episode(
+            media_for=lambda eid: (
+                make_media(eid, MediaKind.ENDOSCOPIC_VIDEO, tag="v"),
+                make_media(eid, MediaKind.AUDIO, deid=DeidStatus.DISCARDED, tag="a"),
+            )
+        )
+        assert [a.kind for a in built.readable_media] == [MediaKind.ENDOSCOPIC_VIDEO]
+
+    def test_discarded_kinematics_reports_as_absent(self, make_episode):
+        built = make_episode(
+            media_for=lambda eid: (
+                make_media(eid, MediaKind.ENDOSCOPIC_VIDEO, tag="v"),
+                make_media(eid, MediaKind.KINEMATICS, deid=DeidStatus.DISCARDED, tag="k"),
+            )
+        )
+        assert built.has_kinematics is False
+
+    def test_episode_whose_only_video_was_discarded_is_rejected(self, make_episode):
+        """Discarding is non-blocking, but it must not erase the video invariant."""
+        with pytest.raises(DomainInvariantError, match="no surviving endoscopic video"):
+            make_episode(
+                media_for=lambda eid: (
+                    make_media(eid, MediaKind.ENDOSCOPIC_VIDEO, deid=DeidStatus.DISCARDED),
+                )
+            )
+
+    def test_discarded_asset_carries_no_attestation_digest(self):
+        with pytest.raises(DomainInvariantError, match="status is discarded"):
+            MediaAsset(
+                id=new_media_asset_id(),
+                episode_id=new_episode_id(),
+                kind=MediaKind.AUDIO,
+                raw_uri="s3://x/a.wav",
+                sha256=sha("a"),
+                deid_status=DeidStatus.DISCARDED,
+                deid_attestation_sha256=sha("att"),
+            )
+
+
+class TestReadableUriGate:
+    """The gate must be reachable only through a name that says so."""
+
+    def test_readable_uri_returns_locator_when_attested(self, episode):
+        asset = episode.endoscopic_video[0]
+        assert asset.readable_uri == asset.raw_uri
+
+    @pytest.mark.parametrize("status", [DeidStatus.RAW, DeidStatus.IN_PROGRESS, DeidStatus.FAILED])
+    def test_readable_uri_raises_when_not_attested(self, make_episode, status):
+        built = make_episode(media_for=lambda eid: (make_media(eid, deid=status),))
+        with pytest.raises(DeidentificationBoundaryError):
+            _ = built.media[0].readable_uri
+
+    def test_readable_media_raises_rather_than_returning_a_subset(self, make_episode):
+        """A partially cleared episode must yield nothing, not a misleading slice."""
+        built = make_episode(
+            media_for=lambda eid: (
+                make_media(eid, MediaKind.ENDOSCOPIC_VIDEO, tag="v"),
+                make_media(eid, MediaKind.KINEMATICS, deid=DeidStatus.RAW, tag="k"),
+            )
+        )
+        with pytest.raises(DeidentificationBoundaryError):
+            _ = built.readable_media
 
 
 class TestImmutability:

@@ -7,13 +7,15 @@ left-hand side up to and including media; scores, decisions and contestations
 arrive in later phases.
 
 Two invariants are enforced here rather than in a service layer, because both
-are architectural commitments that a caller must not be able to opt out of:
+are architectural commitments a caller must not be able to opt out of:
 
 1. **Video is required, kinematics is not** (section 7). An episode without
-   in-body endoscopic video cannot be scored, and no code path may become
-   blocked on kinematics being present.
-2. **De-identification is a gate, not a flag** (section 8). Reading media for
-   perception, scoring, reporting or export requires an attested asset.
+   readable in-body endoscopic video cannot be scored, and no code path may
+   become blocked on kinematics being present.
+2. **De-identification is a gate, not a flag** (section 8). The storage
+   locator for unattested media is reachable only through a name that says so,
+   and :meth:`MediaAsset.readable_uri` raises rather than returning a value
+   the caller must remember to check.
 """
 
 from __future__ import annotations
@@ -39,14 +41,21 @@ from or_audit.domain.ids import (
     SurgeonId,
 )
 from or_audit.errors import DeidentificationBoundaryError, DomainInvariantError
-
-#: Lowercase hex SHA-256 digest.
-Sha256Hex = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+from or_audit.primitives import Sha256Hex
 
 #: Opaque, caller-supplied reference into a customer's own system of record.
 #: Deliberately not validated as a name or MRN -- OR-Audit does not store
 #: patient or surgeon identifiers, only pseudonymous handles (section 8).
 ExternalRef = Annotated[str, StringConstraints(min_length=1, max_length=128)]
+
+#: Statuses that leave nothing readable but also nothing to leak. A discarded
+#: asset is a completed policy decision, so it does not hold up the episode.
+_TERMINAL_ABSENT: frozenset[DeidStatus] = frozenset({DeidStatus.DISCARDED})
+
+#: Statuses that block an episode from being read.
+_BLOCKING: frozenset[DeidStatus] = frozenset(
+    {DeidStatus.RAW, DeidStatus.IN_PROGRESS, DeidStatus.FAILED}
+)
 
 
 class _Frozen(BaseModel):
@@ -88,7 +97,7 @@ class RoboticSystem(_Frozen):
     platform: RobotPlatform
     #: Vendor's model string, free text; informational only.
     model_label: Annotated[str, StringConstraints(max_length=120)] = ""
-    #: True when this system has a negotiated kinematics feed. Advisory:
+    #: True when this system has a negotiated kinematics feed. Advisory only:
     #: no scoring path may require it (section 7, V-1).
     kinematics_agreement_in_place: bool = False
 
@@ -99,8 +108,8 @@ class Procedure(_Frozen):
     id: ProcedureId
     code: Annotated[str, StringConstraints(min_length=1, max_length=40)]
     display_name: Annotated[str, StringConstraints(min_length=1, max_length=200)]
-    #: Whether the Critical View of Safety rubric applies to this procedure.
-    #: Only cholecystectomy-family procedures should set this.
+    #: Whether the Critical View of Safety rubric applies. Only
+    #: cholecystectomy-family procedures should set this.
     cvs_applicable: bool = False
 
 
@@ -110,14 +119,17 @@ class MediaAsset(_Frozen):
     id: MediaAssetId
     episode_id: EpisodeId
     kind: MediaKind
-    #: Storage locator. Never a path containing patient identifiers.
-    uri: Annotated[str, StringConstraints(min_length=1, max_length=1024)]
+    #: Storage locator, named to make unguarded use visible in review. Read it
+    #: directly only from the de-identification pipeline, which by definition
+    #: handles material that has not yet been cleared. Everything downstream
+    #: uses :attr:`readable_uri`.
+    raw_uri: Annotated[str, StringConstraints(min_length=1, max_length=1024)]
     sha256: Sha256Hex
     duration_seconds: Annotated[float, Field(gt=0)] | None = None
     frame_rate: Annotated[float, Field(gt=0)] | None = None
     deid_status: DeidStatus = DeidStatus.RAW
-    #: Identifier of the de-identification attestation that cleared this
-    #: asset. Required when and only when ``deid_status`` is ``ATTESTED``.
+    #: Digest of the de-identification attestation that cleared this asset.
+    #: Required when, and only when, ``deid_status`` is ``ATTESTED``.
     deid_attestation_sha256: Sha256Hex | None = None
 
     @model_validator(mode="after")
@@ -136,6 +148,24 @@ class MediaAsset(_Frozen):
         """Whether this asset may be read by perception, scoring, or export."""
         return self.deid_status is DeidStatus.ATTESTED
 
+    @property
+    def is_present(self) -> bool:
+        """Whether the asset still exists. False once discarded."""
+        return self.deid_status not in _TERMINAL_ABSENT
+
+    @property
+    def readable_uri(self) -> str:
+        """Storage locator, gated on de-identification.
+
+        Returns:
+            The locator, if this asset has been attested.
+
+        Raises:
+            DeidentificationBoundaryError: If it has not.
+        """
+        self.require_readable()
+        return self.raw_uri
+
     def require_readable(self) -> None:
         """Raise unless this asset has cleared de-identification.
 
@@ -152,11 +182,7 @@ class MediaAsset(_Frozen):
 
 
 class Episode(_Frozen):
-    """One performed case: the unit of assessment.
-
-    An episode is the join of a procedure, a surgeon, a system, and the media
-    recorded for it.
-    """
+    """One performed case: the unit of assessment."""
 
     id: EpisodeId
     institution_id: InstitutionId
@@ -182,10 +208,12 @@ class Episode(_Frozen):
             msg = f"episode {self.id} contains duplicate media asset identifiers"
             raise DomainInvariantError(msg)
 
-        if not any(asset.kind is MediaKind.ENDOSCOPIC_VIDEO for asset in self.media):
+        if not any(
+            asset.kind is MediaKind.ENDOSCOPIC_VIDEO and asset.is_present for asset in self.media
+        ):
             msg = (
-                f"episode {self.id} has no endoscopic video; video is the "
-                f"required common denominator (PLAN.md section 7)"
+                f"episode {self.id} has no surviving endoscopic video; video is "
+                f"the required common denominator (PLAN.md section 7)"
             )
             raise DomainInvariantError(msg)
         return self
@@ -199,13 +227,13 @@ class Episode(_Frozen):
 
     @property
     def endoscopic_video(self) -> tuple[MediaAsset, ...]:
-        """Endoscopic video assets, in declaration order."""
-        return tuple(a for a in self.media if a.kind is MediaKind.ENDOSCOPIC_VIDEO)
+        """Surviving endoscopic video assets, in declaration order."""
+        return tuple(a for a in self.media if a.kind is MediaKind.ENDOSCOPIC_VIDEO and a.is_present)
 
     @property
     def kinematics(self) -> tuple[MediaAsset, ...]:
-        """Kinematics assets, if any. Absence is normal, not an error."""
-        return tuple(a for a in self.media if a.kind is MediaKind.KINEMATICS)
+        """Surviving kinematics assets. Absence is normal, not an error."""
+        return tuple(a for a in self.media if a.kind is MediaKind.KINEMATICS and a.is_present)
 
     @property
     def has_kinematics(self) -> bool:
@@ -213,26 +241,46 @@ class Episode(_Frozen):
         return bool(self.kinematics)
 
     @property
-    def deid_status(self) -> DeidStatus:
-        """Aggregate de-identification status across all media.
+    def discarded_media(self) -> tuple[MediaAsset, ...]:
+        """Assets destroyed rather than de-identified, e.g. audio."""
+        return tuple(a for a in self.media if not a.is_present)
 
-        The episode is only ``ATTESTED`` when every asset is. Any failure
-        dominates; otherwise the least-advanced asset wins.
+    @property
+    def deid_status(self) -> DeidStatus:
+        """Aggregate de-identification status across surviving media.
+
+        Discarded assets are excluded: they are a completed disposition, not
+        outstanding work. Failure dominates; otherwise the least-advanced
+        surviving asset wins. An episode whose media were all discarded cannot
+        exist, because the video invariant rejects it at construction.
         """
-        statuses = {a.deid_status for a in self.media}
+        statuses = {a.deid_status for a in self.media if a.is_present}
         if DeidStatus.FAILED in statuses:
             return DeidStatus.FAILED
         if statuses == {DeidStatus.ATTESTED}:
             return DeidStatus.ATTESTED
-        if DeidStatus.IN_PROGRESS in statuses or DeidStatus.ATTESTED in statuses:
+        if statuses & {DeidStatus.IN_PROGRESS, DeidStatus.ATTESTED}:
             return DeidStatus.IN_PROGRESS
         return DeidStatus.RAW
 
-    def require_readable(self) -> None:
-        """Raise unless every media asset has cleared de-identification.
+    @property
+    def readable_media(self) -> tuple[MediaAsset, ...]:
+        """Assets cleared for downstream use.
 
         Raises:
-            DeidentificationBoundaryError: If any asset is not attested.
+            DeidentificationBoundaryError: If any surviving asset is not
+                attested. The whole episode is gated, so a partially cleared
+                episode yields nothing rather than a misleading subset.
+        """
+        self.require_readable()
+        return tuple(a for a in self.media if a.is_present)
+
+    def require_readable(self) -> None:
+        """Raise unless every surviving media asset has cleared de-identification.
+
+        Raises:
+            DeidentificationBoundaryError: If any surviving asset is blocked.
         """
         for asset in self.media:
-            asset.require_readable()
+            if asset.deid_status in _BLOCKING:
+                asset.require_readable()

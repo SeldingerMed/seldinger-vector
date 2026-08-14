@@ -3,21 +3,25 @@
 PLAN.md section 7.3 requires an immutable audit trail carrying score version,
 model version, and decision-rule version. "Immutable" is doing real work: the
 artifact this platform produces can be adverse to a named clinician, so the
-record of how it was produced has to be defensible under challenge.
+record of how it was produced has to survive hostile scrutiny.
 
-Design:
+Design notes worth knowing before changing anything here:
 
-* Each entry hashes its own content **and** the previous entry's hash, so any
-  retroactive edit or deletion breaks verification from that point on.
-* Entries are ordered by a dense sequence starting at zero. Gaps are an error,
-  not a warning.
-* The payload is stored alongside its digest; :meth:`AuditTrail.verify`
-  re-derives the digest, so payload tampering is detected even though the
-  chain hash only covers the digest.
-
-This is tamper-*evident*, not tamper-*proof*: anyone able to rewrite the whole
-log can rebuild a consistent chain. Anchoring the head hash to external
-storage is the follow-on control and is out of scope for the alpha.
+* **The payload is stored as canonical text, not as a dict.** The digest is
+  taken over exactly the bytes that are persisted, and no caller holds a
+  reference into the stored structure. A dict field would let a caller mutate
+  a nested value after the fact and turn a valid chain into one that fails
+  verification -- indistinguishable from tampering, which defeats the point.
+* **Each entry commits to its predecessor**, so edits, deletions in the
+  middle, and reordering all break verification.
+* **Tail truncation is *not* detectable from the chain alone.** Dropping the
+  most recent entries requires no rewriting, and those are exactly the entries
+  an attacker wants gone. :meth:`AuditTrail.verify` therefore accepts
+  ``expected_head`` and ``expected_length``; callers who care must pin the
+  head hash somewhere the chain's owner cannot reach.
+* This is tamper-*evident*, not tamper-*proof*. Anyone able to rewrite the
+  whole log can rebuild a consistent chain. External anchoring of the head
+  hash is the follow-on control.
 """
 
 from __future__ import annotations
@@ -27,18 +31,17 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Any, Final
+from typing import Annotated, Any, Final, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from or_audit.audit.canonical import canonical_json, digest
+from or_audit.audit.canonical import canonical_json, digest, digest_text
 from or_audit.errors import AuditChainError
-from or_audit.version import AUDIT_CHAIN_VERSION
+from or_audit.primitives import AnyEntityId, PrincipalRef, Sha256Hex
+from or_audit.version import AUDIT_CHAIN_VERSION, SCHEMA_VERSION
 
 #: Sentinel ``prev_hash`` for the first entry in a chain.
 GENESIS_HASH: Final = "0" * 64
-
-Sha256Hex = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 
 
 class ActorKind(StrEnum):
@@ -71,6 +74,7 @@ class AuditAction(StrEnum):
     DEID_STARTED = "deid.started"
     DEID_ATTESTED = "deid.attested"
     DEID_FAILED = "deid.failed"
+    DEID_DISCARDED = "deid.discarded"
     # Perception and scoring
     PERCEPTION_COMPLETED = "perception.completed"
     SAFETY_GATE_EVALUATED = "safety_gate.evaluated"
@@ -95,9 +99,10 @@ class Actor(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: ActorKind
-    #: Stable reference to the principal. For services, the component name;
-    #: for people, a pseudonymous identifier. Never a personal name.
-    ref: Annotated[str, StringConstraints(min_length=1, max_length=128)]
+    #: Machine-safe reference to the principal: a component name for services,
+    #: a pseudonymous handle for people. The slug pattern makes it structurally
+    #: incapable of holding a personal name (PLAN.md section 8).
+    ref: PrincipalRef
 
 
 class AuditEntry(BaseModel):
@@ -105,34 +110,82 @@ class AuditEntry(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    schema_version: str
     chain_version: str
     seq: Annotated[int, Field(ge=0)]
     recorded_at: datetime
     actor: Actor
     action: AuditAction
-    #: Identifier of the entity this action concerns, e.g. an episode id.
-    subject_ref: Annotated[str, StringConstraints(min_length=1, max_length=128)]
-    payload: Mapping[str, Any]
+    #: Opaque identifier of the entity this action concerns. Constrained to
+    #: the entity-id shape so free text -- and therefore PHI -- cannot enter
+    #: an append-only, exportable record.
+    subject_ref: AnyEntityId
+    #: The exact canonical JSON that was hashed. Stored verbatim so the digest
+    #: is checkable against the persisted bytes without re-rendering.
+    payload_canonical: str
     payload_digest: Sha256Hex
     prev_hash: Sha256Hex
     entry_hash: Sha256Hex
 
+    @model_validator(mode="after")
+    def _require_aware_timestamp(self) -> Self:
+        if self.recorded_at.tzinfo is None:
+            msg = f"audit entry {self.seq} recorded_at must be timezone-aware"
+            raise AuditChainError(msg)
+        return self
+
+    @property
+    def payload(self) -> dict[str, Any]:
+        """The payload, parsed fresh on each access.
+
+        Returns a new object every time, so a caller mutating the result
+        cannot affect the stored record or the chain.
+        """
+        parsed: dict[str, Any] = json.loads(self.payload_canonical)
+        return parsed
+
     def recompute_hashes(self) -> tuple[str, str]:
         """Recompute ``(payload_digest, entry_hash)`` from this entry's content."""
-        payload_digest = digest(self.payload)
-        entry_hash = digest(
-            {
-                "chain_version": self.chain_version,
-                "seq": self.seq,
-                "recorded_at": self.recorded_at,
-                "actor": {"kind": self.actor.kind, "ref": self.actor.ref},
-                "action": self.action,
-                "subject_ref": self.subject_ref,
-                "payload_digest": payload_digest,
-                "prev_hash": self.prev_hash,
-            }
+        payload_digest = digest_text(self.payload_canonical)
+        return payload_digest, _entry_hash(
+            schema_version=self.schema_version,
+            chain_version=self.chain_version,
+            seq=self.seq,
+            recorded_at=self.recorded_at,
+            actor=self.actor,
+            action=self.action,
+            subject_ref=self.subject_ref,
+            payload_digest=payload_digest,
+            prev_hash=self.prev_hash,
         )
-        return payload_digest, entry_hash
+
+
+def _entry_hash(
+    *,
+    schema_version: str,
+    chain_version: str,
+    seq: int,
+    recorded_at: datetime,
+    actor: Actor,
+    action: AuditAction,
+    subject_ref: str,
+    payload_digest: str,
+    prev_hash: str,
+) -> str:
+    """Hash the entry header. Field set is frozen by ``AUDIT_CHAIN_VERSION``."""
+    return digest(
+        {
+            "schema_version": schema_version,
+            "chain_version": chain_version,
+            "seq": seq,
+            "recorded_at": recorded_at,
+            "actor": {"kind": actor.kind, "ref": actor.ref},
+            "action": action,
+            "subject_ref": subject_ref,
+            "payload_digest": payload_digest,
+            "prev_hash": prev_hash,
+        }
+    )
 
 
 def _utc_now() -> datetime:
@@ -142,9 +195,9 @@ def _utc_now() -> datetime:
 class AuditTrail:
     """An in-memory append-only chain.
 
-    Not thread-safe. Callers needing concurrency should serialize appends;
-    the chain is inherently sequential, so a lock at the call site is both
-    simpler and more honest than internal locking that hides contention.
+    Not thread-safe. Callers needing concurrency should serialize appends; the
+    chain is inherently sequential, so a lock at the call site is both simpler
+    and more honest than internal locking that hides contention.
     """
 
     def __init__(self, *, clock: Callable[[], datetime] = _utc_now) -> None:
@@ -184,55 +237,75 @@ class AuditTrail:
     ) -> AuditEntry:
         """Append an entry and return it.
 
+        The payload is canonicalized immediately, so the entry holds no
+        reference to the caller's structure and later mutation of it is
+        harmless.
+
         Args:
             actor: Principal responsible for the action.
             action: What happened.
-            subject_ref: Identifier of the affected entity.
+            subject_ref: Opaque identifier of the affected entity.
             payload: Structured detail. Must be canonicalizable.
 
         Returns:
             The newly appended entry.
+
+        Raises:
+            ValueError: If the payload has no canonical form. Nothing is
+                appended in that case.
         """
-        body = dict(payload or {})
+        payload_canonical = canonical_json(dict(payload or {}))
+        payload_digest = digest_text(payload_canonical)
         prev_hash = self.head_hash
         seq = len(self._entries)
         recorded_at = self._clock()
-        payload_digest = digest(body)
-        entry_hash = digest(
-            {
-                "chain_version": AUDIT_CHAIN_VERSION,
-                "seq": seq,
-                "recorded_at": recorded_at,
-                "actor": {"kind": actor.kind, "ref": actor.ref},
-                "action": action,
-                "subject_ref": subject_ref,
-                "payload_digest": payload_digest,
-                "prev_hash": prev_hash,
-            }
-        )
         entry = AuditEntry(
+            schema_version=SCHEMA_VERSION,
             chain_version=AUDIT_CHAIN_VERSION,
             seq=seq,
             recorded_at=recorded_at,
             actor=actor,
             action=action,
             subject_ref=subject_ref,
-            payload=body,
+            payload_canonical=payload_canonical,
             payload_digest=payload_digest,
             prev_hash=prev_hash,
-            entry_hash=entry_hash,
+            entry_hash=_entry_hash(
+                schema_version=SCHEMA_VERSION,
+                chain_version=AUDIT_CHAIN_VERSION,
+                seq=seq,
+                recorded_at=recorded_at,
+                actor=actor,
+                action=action,
+                subject_ref=subject_ref,
+                payload_digest=payload_digest,
+                prev_hash=prev_hash,
+            ),
         )
         self._entries.append(entry)
         return entry
 
-    def verify(self) -> None:
-        """Verify the whole chain.
+    def verify(
+        self,
+        *,
+        expected_head: str | None = None,
+        expected_length: int | None = None,
+    ) -> None:
+        """Verify the chain.
+
+        Args:
+            expected_head: Externally pinned hash of the last entry. Supply it
+                to detect tail truncation, which the chain cannot detect alone.
+            expected_length: Externally pinned entry count, for the same reason.
 
         Raises:
-            AuditChainError: On the first inconsistency found, naming the
-                sequence number and the specific check that failed.
+            AuditChainError: On the first inconsistency found.
         """
-        verify_entries(self._entries)
+        verify_entries(
+            self._entries,
+            expected_head=expected_head,
+            expected_length=expected_length,
+        )
 
     def to_jsonl(self, path: Path) -> None:
         """Write the chain to newline-delimited canonical JSON."""
@@ -247,8 +320,8 @@ class AuditTrail:
 
         Args:
             path: File to read.
-            verify: Whether to verify the chain after loading. Leave enabled
-                unless deliberately inspecting a known-broken log.
+            verify: Whether to verify after loading. Leave enabled unless
+                deliberately inspecting a known-broken log.
 
         Returns:
             The loaded trail.
@@ -266,15 +339,26 @@ class AuditTrail:
         return trail
 
 
-def verify_entries(entries: Sequence[AuditEntry]) -> None:
+def verify_entries(
+    entries: Sequence[AuditEntry],
+    *,
+    expected_head: str | None = None,
+    expected_length: int | None = None,
+) -> None:
     """Verify an ordered sequence of audit entries.
 
     Args:
         entries: Entries in ascending sequence order.
+        expected_head: Externally pinned hash of the final entry.
+        expected_length: Externally pinned entry count.
 
     Raises:
         AuditChainError: On the first inconsistency found.
     """
+    if expected_length is not None and len(entries) != expected_length:
+        msg = f"audit chain has {len(entries)} entries, expected {expected_length}"
+        raise AuditChainError(msg)
+
     expected_prev = GENESIS_HASH
     for index, entry in enumerate(entries):
         if entry.seq != index:
@@ -289,7 +373,14 @@ def verify_entries(entries: Sequence[AuditEntry]) -> None:
         if entry.prev_hash != expected_prev:
             msg = f"audit entry {entry.seq} prev_hash does not match previous entry hash"
             raise AuditChainError(msg)
-        payload_digest, entry_hash = entry.recompute_hashes()
+        try:
+            payload_digest, entry_hash = entry.recompute_hashes()
+        except (ValueError, TypeError) as exc:
+            # An entry that cannot be canonicalized cannot be verified.
+            # Surface it in the chain taxonomy rather than leaking the
+            # serializer's error type, so callers have one thing to catch.
+            msg = f"audit entry {entry.seq} cannot be canonicalized for verification: {exc}"
+            raise AuditChainError(msg) from exc
         if payload_digest != entry.payload_digest:
             msg = f"audit entry {entry.seq} payload does not match its recorded digest"
             raise AuditChainError(msg)
@@ -297,3 +388,12 @@ def verify_entries(entries: Sequence[AuditEntry]) -> None:
             msg = f"audit entry {entry.seq} hash does not match its content"
             raise AuditChainError(msg)
         expected_prev = entry.entry_hash
+
+    if expected_head is not None and expected_prev != expected_head:
+        actual = "empty chain" if not entries else f"head {expected_prev}"
+        msg = (
+            f"audit chain head does not match the pinned value "
+            f"({actual}, expected {expected_head}); entries may have been "
+            f"truncated from the end"
+        )
+        raise AuditChainError(msg)

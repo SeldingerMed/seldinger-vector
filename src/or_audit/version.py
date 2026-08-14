@@ -13,8 +13,9 @@ from typing import Final
 #: Version of the OR-Audit package as a whole.
 PACKAGE_VERSION: Final = "0.1.0a0"
 
-#: Version of the domain schema. Bump on any breaking change to entity or
-#: score shapes; persisted records carry this so old artifacts stay readable.
+#: Version of the domain and record schema. Carried on every persisted audit
+#: entry and covered by the entry hash, so a record is self-describing and a
+#: later shape change cannot be applied retroactively without detection.
 SCHEMA_VERSION: Final = "1"
 
 #: Version of the audit-chain construction (hash inputs and ordering).

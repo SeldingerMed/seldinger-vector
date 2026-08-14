@@ -9,7 +9,6 @@ from or_audit.domain.entities import (
     MediaAsset,
     Procedure,
     RoboticSystem,
-    Sha256Hex,
     Surgeon,
 )
 from or_audit.domain.enums import (
@@ -22,6 +21,7 @@ from or_audit.domain.enums import (
     SkillBand,
     ThresholdOwner,
 )
+from or_audit.primitives import Sha256Hex
 
 __all__ = [
     "DeidStatus",

@@ -52,15 +52,22 @@ class MediaKind(StrEnum):
 class DeidStatus(StrEnum):
     """De-identification state of a media asset or episode.
 
-    The state machine is deliberately one-way except for failure:
-    ``RAW -> IN_PROGRESS -> ATTESTED`` or ``-> FAILED``. Only ``ATTESTED``
-    media may cross into perception, scoring, reporting, or export.
+    Transitions are one-way: ``RAW -> IN_PROGRESS -> ATTESTED``, or to
+    ``FAILED``, or to ``DISCARDED``. Only ``ATTESTED`` media may be read by
+    perception, scoring, reporting, or export.
     """
 
     RAW = "raw"
     IN_PROGRESS = "in_progress"
     ATTESTED = "attested"
     FAILED = "failed"
+    #: Terminal: the asset was deliberately destroyed rather than
+    #: de-identified. This is the *default* disposition for intraoperative
+    #: audio (PLAN.md section 8). A discarded asset is not readable, but it
+    #: also does not block the episode -- there is nothing left to leak.
+    #: Distinguishing this from ``FAILED`` matters: one is a completed policy
+    #: decision, the other is unfinished work.
+    DISCARDED = "discarded"
 
 
 class SkillBand(StrEnum):

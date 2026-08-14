@@ -111,7 +111,7 @@ def make_media(
         id=new_media_asset_id(),
         episode_id=episode_id,
         kind=kind,
-        uri=f"s3://deid/{tag}.mp4",
+        raw_uri=f"s3://deid/{tag}.mp4",
         sha256=sha(f"{episode_id}:{tag}"),
         duration_seconds=1800.0,
         frame_rate=30.0,
