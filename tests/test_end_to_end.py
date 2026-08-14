@@ -12,6 +12,8 @@ chain covers the whole run rather than parts of it.
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -324,3 +326,84 @@ class TestHardeningFromReview:
         # Nothing past analysis accepts it: the read gate refuses IN_PROGRESS.
         with pytest.raises(DeidentificationBoundaryError):
             analysed.require_readable()
+
+
+class TestProcessLevelExitCodes:
+    """Exit codes as a shell sees them, not as an in-process caller does.
+
+    Review flagged that every earlier CLI test read ``main()``'s return value,
+    while the fix it was checking exists for scripts -- and scripts read ``$?``.
+    A returned int and a process exit status are only the same thing if nothing
+    between them intervenes, and asserting the former proves nothing about the
+    latter.
+
+    Running the real console entry point in a subprocess is the only assertion
+    that covers what was actually claimed.
+    """
+
+    @staticmethod
+    def _run(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-m", "or_audit.cli", *args],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    @pytest.fixture
+    def audit_log(self, tmp_path: Path) -> tuple[Path, str]:
+        workdir = tmp_path
+        log = workdir / "audit.jsonl"
+        done = self._run(
+            "demo", "--episodes", "1", "--workdir", str(workdir / "w"), "--audit-log", str(log)
+        )
+        assert done.returncode == 0, done.stderr
+        head = next(line.split()[-1] for line in done.stdout.splitlines() if "head " in line)
+        return log, head
+
+    def test_unpinned_exits_three(self, audit_log):
+        log, _ = audit_log
+        done = self._run("verify-audit", str(log))
+        assert done.returncode == 3
+        assert "INCOMPLETE" in done.stderr
+
+    def test_acknowledged_exits_zero_but_still_warns(self, audit_log):
+        """Waiving the check must not remove the notice from the output."""
+        log, _ = audit_log
+        done = self._run("verify-audit", str(log), "--allow-unpinned")
+        assert done.returncode == 0
+        assert "Tail truncation is not detectable" in done.stdout
+
+    def test_pinned_exits_zero(self, audit_log):
+        log, head = audit_log
+        assert self._run("verify-audit", str(log), "--expected-head", head).returncode == 0
+
+    def test_truncated_and_pinned_exits_one(self, audit_log, tmp_path):
+        log, head = audit_log
+        truncated = tmp_path / "truncated.jsonl"
+        truncated.write_text(
+            "\n".join(log.read_text(encoding="utf-8").splitlines()[:-1]) + "\n",
+            encoding="utf-8",
+        )
+        done = self._run("verify-audit", str(truncated), "--expected-head", head)
+        assert done.returncode == 1
+        assert "truncated from the end" in done.stderr
+
+    def test_truncated_and_waived_exits_zero(self, audit_log, tmp_path):
+        """The honest consequence of an operator waiving the check.
+
+        Without a pin, tail truncation is information-theoretically invisible --
+        the head is recomputed from the file itself. Failing anyway would make
+        --allow-unpinned meaningless. What must hold is that the warning is
+        still printed, which the acknowledged case asserts.
+        """
+        log, _ = audit_log
+        truncated = tmp_path / "truncated.jsonl"
+        truncated.write_text(
+            "\n".join(log.read_text(encoding="utf-8").splitlines()[:-1]) + "\n",
+            encoding="utf-8",
+        )
+        assert self._run("verify-audit", str(truncated), "--allow-unpinned").returncode == 0
+
+    def test_missing_file_exits_two(self, tmp_path):
+        assert self._run("verify-audit", str(tmp_path / "nope.jsonl")).returncode == 2
