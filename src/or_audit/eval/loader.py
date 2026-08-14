@@ -1,4 +1,4 @@
-"""Load Harbor-shaped task and dataset directories."""
+"""Load Harbor-shaped task, dataset, and agent directories."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from or_audit.errors import TaskContractError
+from or_audit.eval.agent import AgentPackage
 from or_audit.eval.dataset import DatasetSpec
 from or_audit.eval.task import TaskSpec
 
@@ -80,3 +81,30 @@ def load_dataset(path: Path | str) -> DatasetSpec:
         raise TaskContractError(msg) from exc
     spec.check_tasks()
     return spec
+
+
+def _agent_root(path: Path) -> Path:
+    resolved = path.resolve()
+    if resolved.is_dir():
+        return resolved
+    if resolved.name == "agent.toml":
+        return resolved.parent
+    msg = f"an agent is a directory (or its agent.toml), got {path}"
+    raise TaskContractError(msg)
+
+
+def load_agent(path: Path | str) -> AgentPackage:
+    """Load and validate an ``org/name`` agent package.
+
+    Raises:
+        TaskContractError: If files are missing or the contract fails.
+    """
+    root = _agent_root(Path(path))
+    data = _read_toml(root / "agent.toml")
+    try:
+        return AgentPackage.model_validate(data)
+    except TaskContractError:
+        raise
+    except Exception as exc:
+        msg = f"agent {root} failed validation: {exc}"
+        raise TaskContractError(msg) from exc

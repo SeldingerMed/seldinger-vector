@@ -4,7 +4,6 @@ task_version = "0"
 
 [metadata]
 title = "Wall-safe branch navigation"
-family = "endovascular"
 modality = "endovascular-sim"
 tags = ["lumen", "navigation", "safety"]
 safety_critical = true
@@ -22,6 +21,11 @@ gym_id = "Lumen/NavTreeBranch-v0"
 world_pin = ""
 n_eval_episodes = 30
 seed_policy = "deterministic-eval-30"
+
+[port]
+id = "gym-policy"
+observation = "gym-obs"
+action = "insertion_twist"
 
 [agent]
 kinds = ["policy", "random"]

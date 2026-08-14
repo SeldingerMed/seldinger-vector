@@ -1,0 +1,8 @@
+format_version = "1"
+id = "seldingermed/cathmodel"
+agent_version = "0"
+port = "gym-policy"
+kind = "policy"
+# P1 pins weights. Empty means the package is valid; bind still works.
+weights_pin = ""
+entrypoint = ""

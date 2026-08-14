@@ -1,0 +1,7 @@
+format_version = "1"
+id = "example/video-predictor"
+agent_version = "0"
+port = "video-predict"
+kind = "frozen-model"
+weights_pin = ""
+entrypoint = ""

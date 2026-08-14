@@ -24,7 +24,7 @@ from or_audit.eval.enums import (
     AttestationLevel,
     OracleKind,
     PhiClass,
-    ProcedureFamily,
+    PortId,
     ProjectionId,
     SubjectKind,
     WorldKind,
@@ -44,17 +44,39 @@ class _Frozen(BaseModel):
 
 
 class TaskMetadata(_Frozen):
-    """What the task is about.
+    """Human-facing description. Tags are open strings, not a procedure enum.
 
-    ``family`` is load-bearing: it is how a cholecystectomy task and a
-    guidewire task share a harness without one pretending to be the other.
+    The kernel does not know CABG from cath. Search tags may say either;
+    binding happens on ``PortSpec``, not on these fields.
     """
 
     title: NonEmpty
-    family: ProcedureFamily
     modality: NonEmpty
     tags: tuple[str, ...] = ()
     safety_critical: bool = True
+
+
+class PortSpec(_Frozen):
+    """I/O contract this task requires. The finite extension point.
+
+    ``prediction`` is an open slug the *task author* names (next-step,
+    outcome, mask, …). It is not a closed medical vocabulary.
+    """
+
+    id: PortId
+    observation: str = ""
+    action: str = ""
+    prediction: str = ""
+
+    @model_validator(mode="after")
+    def _video_predict_names_a_schema(self) -> Self:
+        if self.id is PortId.VIDEO_PREDICT and not self.prediction:
+            msg = (
+                "a video-predict port must name prediction — the field schema "
+                "the task author brought, not a procedure we enumerated"
+            )
+            raise TaskContractError(msg)
+        return self
 
 
 class SubjectSpec(_Frozen):
@@ -182,6 +204,7 @@ class TaskSpec(_Frozen):
     subject: SubjectSpec
     phi: PhiSpec
     environment: WorldSpec
+    port: PortSpec
     agent: AgentSpec
     oracle: OracleSpec
     verifier: VerifierSpec
@@ -233,6 +256,24 @@ class TaskSpec(_Frozen):
                 f"{self.environment.kind.value}"
             )
             raise TaskContractError(msg)
+        if self.port.id is PortId.GYM_POLICY and self.environment.kind not in {
+            WorldKind.LUMEN_GYM,
+            WorldKind.LUMEN_REPLAY,
+            WorldKind.GYM,
+        }:
+            msg = f"task {self.id} is gym-policy but world kind is {self.environment.kind.value}"
+            raise TaskContractError(msg)
+        if self.port.id is PortId.VIDEO_PREDICT and self.environment.kind not in {
+            WorldKind.FRAME_SOURCE,
+            WorldKind.ANGIOSTRESS_CONTRACT,
+            WorldKind.LUMEN_REPLAY,
+        }:
+            msg = (
+                f"task {self.id} is video-predict but world kind is "
+                f"{self.environment.kind.value}; predict tasks score media "
+                f"against labels, they do not step a gym"
+            )
+            raise TaskContractError(msg)
         metric_ids = {m.id for m in self.verifier.metrics}
         if "safe_success" in metric_ids and self.verifier.headline == "raw_success":
             msg = (
@@ -267,7 +308,7 @@ class TaskSpec(_Frozen):
         metrics = ", ".join(m.id for m in self.verifier.metrics)
         return (
             f"Task {self.id}@{self.task_version} ({self.metadata.title})\n"
-            f"  family     {self.metadata.family.value}\n"
+            f"  port       {self.port.id.value}\n"
             f"  world      {self.environment.kind.value} {self.environment.gym_id} pin={pin}\n"
             f"  subject    {self.subject.kind.value}  phi={self.phi.class_.value}\n"
             f"  oracle     {self.oracle.kind.value}\n"

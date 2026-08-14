@@ -1,9 +1,13 @@
 """Closed vocabularies for eval tasks.
 
 Harbor gets by with a Dockerfile and a float. Procedural medical evals have to
-name the world, the oracle, the subject, and the PHI class up front or the
-runner will silently do the wrong thing. These enums are the fields Harbor
-does not have; BUILD.md section 1.3 treats them as non-negotiable.
+name the *port*, the world, the oracle, the subject, and the PHI class up
+front or the runner will silently do the wrong thing. These enums are the
+fields Harbor does not have; BUILD.md section 1.3 treats them as
+non-negotiable.
+
+Ports are the finite set. Procedures are not: CABG next-step, a cath policy,
+and a model we have never heard of all share a port or they do not bind.
 """
 
 from __future__ import annotations
@@ -34,32 +38,38 @@ class PhiClass(StrEnum):
     PROHIBITED = "prohibited"
 
 
-class ProcedureFamily(StrEnum):
-    """What the task is *about*. Required, so the sandbox is not silently
-    an endovascular product that happens to live in a generic harness.
+class PortId(StrEnum):
+    """I/O contract between an agent and a task.
 
-    Lumen Layer 0 (continuum instrument in a deformable lumen) covers
-    ``endovascular`` *and* ``endoscopy``. Laparoscopy and robotic surgery
-    are different worlds (video, rigid tools, suturing sims). New families
-    are new datasets, not a new company.
+    This is the finite set. Harbor's analog is "the agent speaks to a
+    shell inside Docker." We cannot put an OR in a container, so we name
+    the two ways a procedural model actually talks:
+
+    * ``gym-policy`` — closed loop: observation in, action out, world steps.
+    * ``video-predict`` — open loop: media in, structured prediction out
+      (next step, outcome, mask, phase — the *field names* are the task
+      author's, not a medical ontology we maintain).
+
+    A new procedure is a new dataset on one of these ports, not a new
+    enum member. If a third port is ever needed it is a kernel change
+    with tests, not a tag.
     """
 
-    ENDOVASCULAR = "endovascular"
-    ENDOSCOPY = "endoscopy"
-    LAPAROSCOPY = "laparoscopy"
-    ROBOTIC_SURGERY = "robotic-surgery"
-    OTHER = "other"
+    GYM_POLICY = "gym-policy"
+    VIDEO_PREDICT = "video-predict"
 
 
 class WorldKind(StrEnum):
-    """What Harbor would call the environment — the world, not the container.
+    """How we host a world — Harbor's Docker/Daytona/Modal, not anatomy.
 
-    ``lumen-gym`` is the first physics adapter, not the only one.
+    ``lumen-gym`` is the first physics adapter, not the only one. A
+    third-party gym is ``gym``. Uploaded video with labels is
+    ``frame-source``. None of these names a procedure.
     """
 
     LUMEN_GYM = "lumen-gym"
     LUMEN_REPLAY = "lumen-replay"
-    #: Any Gymnasium env that is not Lumen (suturing sims, dVRK, …).
+    #: Any Gymnasium env that is not Lumen. The gym_id is the task author's.
     GYM = "gym"
     ANGIOSTRESS_CONTRACT = "angiostress-contract"
     FRAME_SOURCE = "frame-source"

@@ -2,7 +2,8 @@
 
 ``demo`` / ``verify-audit`` / ``describe-rule``
     The original credentialing-mode tools. Still work; they are not the wedge.
-``tasks validate`` / ``tasks describe`` / ``datasets validate``
+``tasks validate`` / ``tasks describe`` / ``datasets validate`` /
+``agents validate`` / ``bind``
     BUILD.md P0: load the Harbor-shaped eval contract without talking to Lumen.
 
 Written against ``argparse`` rather than a CLI framework.
@@ -21,7 +22,8 @@ from or_audit.decision.rule import DecisionRule
 from or_audit.demo import run_demo
 from or_audit.domain.enums import ThresholdOwner
 from or_audit.errors import AuditChainError, TaskContractError
-from or_audit.eval.loader import load_dataset, load_task
+from or_audit.eval.bind import assert_bind
+from or_audit.eval.loader import load_agent, load_dataset, load_task
 from or_audit.version import PACKAGE_VERSION
 
 _DISCLAIMER = (
@@ -152,6 +154,30 @@ def _datasets_validate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _agents_validate(args: argparse.Namespace) -> int:
+    """Load an org/name agent package."""
+    try:
+        agent = load_agent(Path(args.path))
+    except TaskContractError as exc:
+        print(f"INVALID: {exc}", file=sys.stderr)
+        return 1
+    print(f"valid: {agent.id}@{agent.agent_version} port={agent.port.value}")
+    return 0
+
+
+def _bind(args: argparse.Namespace) -> int:
+    """Refuse a (task, agent) pair whose ports do not match."""
+    try:
+        task = load_task(Path(args.task))
+        agent = load_agent(Path(args.agent))
+        assert_bind(task, agent)
+    except TaskContractError as exc:
+        print(f"INCOMPATIBLE: {exc}", file=sys.stderr)
+        return 1
+    print(f"bind: {agent.id} -> {task.id} port={task.port.id.value}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser."""
     parser = argparse.ArgumentParser(
@@ -213,6 +239,20 @@ def build_parser() -> argparse.ArgumentParser:
     datasets_validate = datasets_sub.add_parser("validate", help="load a dataset and its tasks")
     datasets_validate.add_argument("path", help="dataset directory or dataset.toml")
     datasets_validate.set_defaults(func=_datasets_validate)
+
+    agents = sub.add_parser("agents", help="validate an org/name agent package")
+    agents_sub = agents.add_subparsers(dest="agents_command", required=True)
+    agents_validate = agents_sub.add_parser("validate", help="load and check an agent directory")
+    agents_validate.add_argument("path", help="agent directory or agent.toml")
+    agents_validate.set_defaults(func=_agents_validate)
+
+    bind = sub.add_parser(
+        "bind",
+        help="check that an agent implements the port a task requires",
+    )
+    bind.add_argument("task", help="task directory or task.toml")
+    bind.add_argument("agent", help="agent directory or agent.toml")
+    bind.set_defaults(func=_bind)
 
     return parser
 
