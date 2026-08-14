@@ -33,6 +33,7 @@ plan and should not be relaxed without amending it.
 | The score vector never implicitly collapses | `scoring` (later phase) | Hard safety gates must not average into soft skill scores (§7.1). |
 | Abstention is a required output class | `Determination.INDETERMINATE`, `GateStatus.NOT_ASSESSABLE` | A scorer that cannot decline gets forced into false confidence where liability concentrates (§7.2). |
 | Every artifact is versioned and chained | `audit.AuditTrail` | The record must be defensible under challenge (§7.3). |
+| Attestation requires bytes, not assertion | `deid.redact` | The pipeline hashes what its writer wrote; no caller supplies the digest. A status settable by assertion protects nothing (§8). |
 | Platform is data, never a branch | `domain.RobotPlatform` | Vendor-specific behaviour belongs in ingestion adapters only. |
 
 ## Layout
@@ -41,6 +42,9 @@ plan and should not be relaxed without amending it.
 src/or_audit/
   domain/    entities, closed vocabularies, invariants (no I/O)
   audit/     canonical serialization, tamper-evident append-only trail
+  media/     frame access behind a FrameSource protocol
+  ingest/    manifests into episodes; kinematics/video alignment
+  deid/      detectors, policy, redaction plans, attestation
 docs/PLAN.md the product plan this implements
 ```
 
