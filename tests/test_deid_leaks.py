@@ -628,3 +628,220 @@ class TestRedactionIsExactNotMerelySafe:
         for onset in range(60, 70):
             pattern = [out_of_body() if onset <= i < onset + 25 else in_body() for i in range(90)]
             assert leaked_frame_count(pattern, stride=1) == 0, f"onset {onset}"
+
+
+class TestOverlayCoversPartialBlocks:
+    """Regression: a burned-in identifier not aligned to the block grid.
+
+    A block is seeded only when every pixel in it is static, so an overlay whose
+    edge falls mid-block left that block unseeded and its pixels visible. A
+    40-pixel-wide identifier on a 16-pixel grid seeded columns 0 and 1 and left
+    pixels 32-39 unmasked -- a sliver of an MRN, which is exactly what this
+    detector exists to remove.
+
+    Found by the end-to-end test, not by the unit tests, because every unit
+    fixture used a grid-aligned overlay. Worth remembering: aligned fixtures
+    hide alignment bugs.
+    """
+
+    #: Larger than the 16x16 in_body() helper: an overlay-alignment test needs
+    #: a frame several blocks wide, or every box is clamped to the frame edge
+    #: and the bug becomes invisible.
+    FRAME_H, FRAME_W = 96, 128
+
+    @classmethod
+    def _frames(cls, width: int, height: int = 16) -> list[np.ndarray]:
+        """Moving anatomy with a static overlay of the given size."""
+        out = []
+        for index in range(12):
+            rng = np.random.default_rng(index)
+            frame = np.zeros((cls.FRAME_H, cls.FRAME_W, 3), dtype=np.uint8)
+            frame[..., 0] = rng.integers(180, 215, (cls.FRAME_H, cls.FRAME_W))
+            frame[..., 1] = rng.integers(35, 70, (cls.FRAME_H, cls.FRAME_W))
+            frame[..., 2] = rng.integers(35, 70, (cls.FRAME_H, cls.FRAME_W))
+            frame[0:height, 0:width] = 255
+            out.append(frame)
+        return out
+
+    @pytest.mark.parametrize("width", [9, 15, 16, 17, 24, 31, 32, 40, 47])
+    def test_every_overlay_width_is_fully_covered(self, width):
+        from or_audit.deid.detectors import detect_static_overlays
+
+        source = InMemoryFrameSource(self._frames(width), frame_rate=FRAME_RATE)
+        boxes = detect_static_overlays(source, stride=1, block=16)
+        assert boxes, f"overlay of width {width} was not detected at all"
+        box = boxes[0]
+        assert box.left == 0
+        assert box.right >= width, (
+            f"overlay spans 0..{width} but the mask stops at {box.right}, "
+            f"leaving {width - box.right} column(s) of identifier visible"
+        )
+
+    @pytest.mark.parametrize("height", [9, 16, 20, 33])
+    def test_every_overlay_height_is_fully_covered(self, height):
+        from or_audit.deid.detectors import detect_static_overlays
+
+        source = InMemoryFrameSource(self._frames(40, height), frame_rate=FRAME_RATE)
+        boxes = detect_static_overlays(source, stride=1, block=16)
+        assert boxes
+        assert boxes[0].bottom >= height
+
+    @pytest.mark.parametrize("width", [1, 4])
+    def test_sub_block_overlays_are_a_declared_limit_not_a_silent_miss(self, width):
+        """Recall is bounded by the block size, and the bound is documented.
+
+        Text thinner than roughly half a block seeds nothing. Lowering `block`
+        recovers it, which is the documented remedy; asserting the default
+        catches it would be asserting a capability the algorithm does not have.
+        """
+        from or_audit.deid.detectors import detect_static_overlays
+
+        frames = self._frames(width)
+        coarse = InMemoryFrameSource(frames, frame_rate=FRAME_RATE)
+        assert detect_static_overlays(coarse, stride=1, block=16) == ()
+
+        fine = InMemoryFrameSource(frames, frame_rate=FRAME_RATE)
+        boxes = detect_static_overlays(fine, stride=1, block=2)
+        assert boxes, "a smaller block must recover a sub-block overlay"
+        assert boxes[0].right >= width
+
+    def test_masking_the_overlay_removes_it_from_written_output(self, tmp_path):
+        """The property that actually matters, checked on the file."""
+        from or_audit.deid.detectors import detect_static_overlays
+        from or_audit.deid.plan import PlannedBox
+        from or_audit.media.frames import NpzFrameSource
+
+        source = InMemoryFrameSource(self._frames(40), frame_rate=FRAME_RATE)
+        boxes = detect_static_overlays(source, stride=1, block=16)
+        plan = RedactionPlan(
+            policy_version="1",
+            detectors=("temporal-invariance@1",),
+            source_frame_count=source.frame_count,
+            source_frame_rate=FRAME_RATE,
+            masked_boxes=tuple(
+                PlannedBox(left=b.left, top=b.top, right=b.right, bottom=b.bottom, reason="overlay")
+                for b in boxes
+            ),
+        )
+        NpzFrameWriter(tmp_path / "o.npz").write(apply_plan(source, plan), frame_rate=FRAME_RATE)
+        reloaded = NpzFrameSource(tmp_path / "o.npz")
+        assert reloaded.read(0).pixels[0:16, 0:40].max() == 0
+
+
+class TestOverlayRecallBoundIsPolicedNotJustDocumented:
+    """A declared bound cannot on its own justify marking media attested.
+
+    An attestation is a claim about what was removed (PLAN.md section 8). If the
+    configuration cannot guarantee coverage of legible burned-in text, that is a
+    deliberate recall trade and must be recorded -- exactly as a coarse analysis
+    stride is. Documentation alone would let an unbounded de-identification gap
+    read as a pass.
+    """
+
+    def test_the_default_configuration_guarantees_legible_text(self):
+        policy = DeidPolicy()
+        assert policy.overlay_min_detectable_px == 8
+        assert policy.overlay_recall_justification is None
+
+    @pytest.mark.parametrize(("block", "fraction"), [(32, 0.5), (16, 1.0), (64, 0.25), (24, 0.5)])
+    def test_a_coarse_grid_without_a_justification_is_refused(self, block, fraction):
+        with pytest.raises(
+            DeidentificationBoundaryError, match="requires overlay_recall_justification"
+        ):
+            DeidPolicy(overlay_block_px=block, overlay_min_static_fraction=fraction)
+
+    def test_the_error_states_that_such_a_policy_cannot_attest(self):
+        with pytest.raises(DeidentificationBoundaryError, match="it cannot attest"):
+            DeidPolicy(overlay_block_px=32)
+
+    def test_a_justified_coarse_grid_may_be_constructed_for_analysis(self):
+        policy = DeidPolicy(
+            overlay_block_px=32,
+            overlay_recall_justification="4K capture; burned-in text is 40px tall",
+        )
+        assert policy.overlay_min_detectable_px == 16
+        assert not policy.guarantees_overlay_coverage
+
+    def test_a_finer_grid_needs_no_justification(self):
+        assert DeidPolicy(overlay_block_px=4).overlay_min_detectable_px == 2
+
+    def test_a_coarse_policy_may_analyse_but_may_not_attest(self, tmp_path):
+        """The line between analysis and attestation.
+
+        A justification records the trade; it does not remove the risk, and no
+        string makes the media clean. The remedy is a finer grid.
+        """
+        source = InMemoryFrameSource([in_body()] * 30, frame_rate=FRAME_RATE)
+        asset = MediaAsset(
+            id=new_media_asset_id(),
+            episode_id=new_episode_id(),
+            kind=MediaKind.ENDOSCOPIC_VIDEO,
+            raw_uri="s3://raw/case.mp4",
+            sha256="a" * 64,
+            deid_status=DeidStatus.RAW,
+        )
+        coarse = DeidPolicy(
+            overlay_block_px=32,
+            overlay_recall_justification="4K archive backfill triage pass",
+        )
+        assert not coarse.guarantees_overlay_coverage
+        analysed, plan = analyze(asset, source, coarse)
+        assert analysed.deid_status is DeidStatus.IN_PROGRESS
+        with pytest.raises(DeidentificationBoundaryError, match="cannot attest media"):
+            redact(
+                analysed,
+                source,
+                plan,
+                coarse,
+                NpzFrameWriter(tmp_path / "o.npz"),
+                performed_by="deid-pipeline",
+            )
+
+    def test_the_error_names_the_remedy(self, tmp_path):
+        source = InMemoryFrameSource([in_body()] * 30, frame_rate=FRAME_RATE)
+        asset = MediaAsset(
+            id=new_media_asset_id(),
+            episode_id=new_episode_id(),
+            kind=MediaKind.ENDOSCOPIC_VIDEO,
+            raw_uri="s3://raw/case.mp4",
+            sha256="a" * 64,
+            deid_status=DeidStatus.RAW,
+        )
+        coarse = DeidPolicy(overlay_block_px=32, overlay_recall_justification="triage")
+        analysed, plan = analyze(asset, source, coarse)
+        with pytest.raises(DeidentificationBoundaryError, match="finer overlay_block_px"):
+            redact(
+                analysed,
+                source,
+                plan,
+                coarse,
+                NpzFrameWriter(tmp_path / "o.npz"),
+                performed_by="deid-pipeline",
+            )
+
+    def test_the_default_policy_can_attest(self):
+        assert DeidPolicy().guarantees_overlay_coverage
+
+    def test_the_bound_reaches_the_plan_and_the_attestation(self, tmp_path):
+        """The artifact must not read as a claim of total coverage."""
+        source = InMemoryFrameSource([in_body()] * 30, frame_rate=FRAME_RATE)
+        asset = MediaAsset(
+            id=new_media_asset_id(),
+            episode_id=new_episode_id(),
+            kind=MediaKind.ENDOSCOPIC_VIDEO,
+            raw_uri="s3://raw/case.mp4",
+            sha256="a" * 64,
+            deid_status=DeidStatus.RAW,
+        )
+        policy = DeidPolicy(overlay_block_px=8)
+        analysed, plan = analyze(asset, source, policy)
+        assert plan.overlay_min_detectable_px == 4
+        _, attestation = redact(
+            analysed,
+            source,
+            plan,
+            policy,
+            NpzFrameWriter(tmp_path / "o.npz"),
+            performed_by="deid-pipeline",
+        )
+        assert attestation.summary()["overlay_min_detectable_px"] == 4
