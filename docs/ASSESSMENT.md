@@ -1,48 +1,46 @@
 # OR-Audit as Harbor for medicine
 
-**Status:** assessment of v0.1, not a replacement for [`PLAN.md`](PLAN.md)
-**Scope:** what this repository is, what a hostile reading says, what a precise reading says, what it could become, how to refine it, and how to test it before anything is deployed
-**Companions:** [Seldinger Lumen](https://github.com/SeldingerMed/seldinger-lumen) (Layer 0 world model), [AngioStress](https://github.com/SeldingerMed/angiostress-benchmark) (real-data perception benchmark)
+**Status:** v0.3 implementation assessment; [`BUILD.md`](BUILD.md) is the product architecture and [`V0.3.md`](V0.3.md) is the migration record.
+**Scope:** architectural rationale, hostile readings, evidence boundaries, and pre-deployment test layers.
+**Companions:** [Seldinger Lumen](https://github.com/SeldingerMed/seldinger-lumen), [AngioStress](https://github.com/SeldingerMed/angiostress-benchmark), and the in-tree counterfactual world-model path.
 
 This document exists because `PLAN.md` and the founding intent are not the same product.
 
 - `PLAN.md` is a **credentialing / QA attestation** thesis: sell a vendor-neutral score of *named surgeons* to hospitals and robot-platform challengers, under a legal wrapper a risk officer can hold.
-- The founding intent, restated against this repo, is an **eval environment and assessment layer for technical AI in medicine** — physical AI, image-conditioned decisions, world models, robotics — the thing Harbor and Prime Intellect are for coding agents. Harbor does not enumerate programming languages in the kernel; we do not enumerate procedures. The sandbox binds `org/name` agents (`seldingermed/lumen-linear`, a stranger’s CABG next-step VLM) to submitted tasks by **port**, not by specialty.
+- The implemented product is an **evaluation and assessment layer for technical AI in medicine**: physical AI, image-conditioned decisions, world models, and robotics. Agents bind to task interfaces by declared capability, not by specialty or a closed port enum.
 
 **Decision (2026-08-14): Future B is the wedge.** Build Harbor-for-medicine — niche eval / RL infrastructure for procedural medical AI and world models. Named-human credentialing (`PLAN.md`) stays a gated mode on the same rails and does not block this plan.
 
 The definitive build spec is [`BUILD.md`](BUILD.md). This file remains the straw-man / steel-man and the pre-deployment test layers.
 
-v0.1 accidentally implemented the *hard subset* of that product while marketing credentialing. That is not a failure. It is a category error this plan corrects.
+v0.3 completes the framework layer this assessment originally identified as missing: versioned task/taskset/agent contracts, capability satisfaction, isolated package runtimes, closed-loop/interactive/single-turn/counterfactual harnesses, typed procedural traces, vector scorecards, replay, and declarative RL projections.
 
-Nothing here clears those gates. Nothing here is clinical validation, regulatory advice, or a claim that the synthetic demo is evidence of performance.
+The remaining questions in this assessment concern external adoption, task quality, data rights, calibration, and deployment—not whether the shared harness contract exists.
 
 ---
 
 ## 1. What actually exists
 
-Three Seldinger surfaces already cover the Harbor stack, under different names, in different repos, with no common task contract.
+The common v0.3 contract now connects the OR-Audit verifier, Lumen worlds, AngioStress contracts, and counterfactual model evaluation.
 
-### 1.1 This repo (`or-audit` v0.2.0a0)
+### 1.1 This repo (`or-audit` v0.3.0a0)
 
-Engineering scaffolding for the pipeline in `PLAN.md` §7.1. What is load-bearing in code, not comments:
+The repository now contains two explicit layers:
 
-| Layer | What it actually is | What it is not |
-|---|---|---|
-| `domain` | Frozen entities, closed vocabularies, video-required / kinematics-optional, de-id as a gate | A hospital integration, an EHR connector |
-| `audit` | Canonical JSON, hash-chained append-only log, pinned-head verification (truncation is *not* detectable without the pin) | Tamper-proof storage; anyone who rewrites the whole log can forge a consistent chain |
-| `ingest` | Manifest → episode | Capture from an OR, DICOM, vendor SDKs |
-| `deid` | Screening heuristics (redness-ratio out-of-body, temporal-invariance overlay), policy that **refuses to attest** without a recorded overlay-size measurement (V-10) | A validated PHI classifier; the detectors themselves say so |
-| `perception` | A protocol plus an expert-annotation backend; Cholec80 phase vocabulary | A trained model. There is no heuristic pretending to do phase or structure ID |
-| `scoring.gates` | Deterministic CVS / proximity / bleeding rules; `SafetyGateSet` raises on `float`/`int`/`bool` | A CV model; gates consume observations, they do not see pixels |
-| `scoring.skill` | Binary proficiency primary, GEARS secondary; no GEARS-only result | Automated skill scoring |
-| `metrics` | ICC(2,1) only; relative target against the panel; mixed-band ICC cannot be the headline; panel-adequacy floor | A published calibration on real raters |
-| `decision` | Versioned collapse to meets / does-not-meet / **indeterminate**; contestation, surfaced disagreement, right of response | A live privileging system |
-| `cli` | Synthetic demo, audit verify, rule describe | An API, a UI, a hosted eval runner |
+| Layer | Load-bearing implementation |
+|---|---|
+| `eval.contracts` | Interfaces, capabilities, harness modes, scenarios, perturbations, runtime descriptors |
+| `eval.loader` | Canonical v0.3 packages plus deterministic v0.2 normalization |
+| `eval.bind` | Schema-level capability satisfaction and accepted agent-kind checks |
+| `eval.plugins` / `plugin_host` | Persistent JSON subprocess protocol; explicit trusted in-process test mode |
+| `eval.runner` | Closed-loop, interactive, single-turn, and counterfactual dispatch without procedure branches |
+| `eval.trace` | Typed procedural evidence for transitions, uncertainty, failure, recovery, handoff, tools, and timing |
+| `eval.vector` / `scorecard` | Hard gates plus boolean, continuous, categorical, and unassessable metric semantics |
+| `eval.job` / `reconstitute` | Portable package bundles, content heads, vector reconstruction, deterministic replay |
+| `eval.registry` | Taskset and agent resolution with v0.2 dataset compatibility |
+| Existing domain/audit/de-id/scoring modules | Credentialing-mode invariants and evidence controls retained beside the eval framework |
 
-Tests are the strongest part of the repo: invariant tests, leak-regression tests (`tests/test_deid_leaks.py`), gate-evidence discipline, agreement-gate protections against a degraded panel, end-to-end composition on synthetic 64×96 frames. CI is lint + mypy + pytest at ≥90% coverage on 3.11–3.13.
-
-Honest ceiling of v0.1: **the contracts compose, and several failure modes that would make a medical eval harness indefensible are refused in types.** Honest floor: **no real media, no trained perception, no rater panel, no buyer, no legal opinion.** The demo is explicit about this.
+Three in-tree executions cover the generalized surface: Lumen closed-loop policy evaluation, procedural-video structured prediction with abstention, and counterfactual consequence ranking with uncertainty and recovery events.
 
 ### 1.2 Lumen (open core, Layer 0)
 
@@ -62,23 +60,21 @@ A frozen-model stress test on real DSA (DIAS) and endovascular segmentation (Cat
 
 AngioStress is already a *dataset + verifier* in the Harbor sense, except the agent is a frozen segmentation model rather than a coding agent, and the sandbox is a prediction contract rather than a container.
 
-### 1.4 The missing piece
+### 1.4 The framework piece is now implemented
 
-Harbor's unit of work is a **task**:
+OR-Audit's unit of work is a versioned task package:
 
+```text
+task.toml       interface, harness, pinned world, metric and gate declarations
+instruction.md  agent-visible task instruction
+inputs/world    observations or task inputs
+labels/oracle   verifier-only evidence
+verifier.py     task-owned vector scoring
 ```
-task.toml          metadata, resources, timeouts
-instruction.md     what the agent is told
-environment/       the world (Dockerfile)
-tests/             verifier → reward in [0, 1]
-solution/          optional oracle
-```
 
-Prime Intellect adds a hub, hosted evals, and RL rollouts on that same shape.
+An agent package declares capabilities and runtime identity. `bind` proves compatibility before execution. `run` invokes the matching generic harness, keeps labels out of the agent request, and emits a typed trace plus vector. `replay` reconstructs the vector through the bundled verifier and checks package and artifact heads. `export-rl` applies only the task's declarative projection rule.
 
-Seldinger has environments (Lumen), a real-data perception surface (AngioStress), and a verifier/attestation kernel (this repo). It does not have a task contract that can host all three, an agent protocol that can host a policy / a VLM / a frozen model / a human rater without lying about which one ran, or a runner that can emit a Harbor-style result **without collapsing safety into a scalar reward**.
-
-`PLAN.md` §5 says this is "not a general AI-eval framework (Harbor/Braintrust class)" and that the harness is a delivery vehicle. That sentence is the thing to reopen. The harness *is* the product if the customers are labs, robot-policy teams, and assurance programs. The harness is a delivery vehicle only if the customer is a privileging committee. Those are different companies that can share a kernel. v0.1 built the kernel.
+The missing product evidence has moved outward: third-party task authors, external model teams running unchanged packages, calibrated real-data tasks, and buyers using the artifacts in an actual assurance or training workflow.
 
 ---
 
@@ -438,8 +434,8 @@ The rejected column is how this becomes a meme. The keep column is why v0.1's ap
 
 Future B is the wedge. See [`BUILD.md`](BUILD.md).
 
-1. **Wedge = eval hub**, not hospital credentialing. `PLAN.md` Phase 0 no longer blocks a first ship of Lumen/AngioStress evals.
-2. **Harness is the company; corpus stays private / procedural-public.** Same firewall as Lumen. Public tasks repo at P4, Apache-2.0.
-3. **First deployed number = Lumen `safe_success` through this harness.** Small is fine. Hiding wall injury is not.
+1. **Wedge = evaluation infrastructure.** Task interfaces, isolated runtimes, replay, vectors, and projections ship as one framework.
+2. **Harness is the product; task content stays package-owned.** Public and private tasksets use the same contracts.
+3. **Three reference paths stay runnable.** Lumen closed loop, procedural-video single turn, and counterfactual world-model ranking prevent the architecture from collapsing back into one benchmark.
 
-P0 (task/dataset/vector types, `or-audit tasks validate`) ships in this repository. P1 (Lumen adapter, `or-audit run`) is the next PR, against a pinned Lumen commit.
+v0.3 is the implemented baseline. The next product milestone is one external lab or model team running a published package without a harness change and deciding whether the resulting third-party vector is useful enough to adopt.

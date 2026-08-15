@@ -25,8 +25,12 @@ from or_audit.domain.enums import ThresholdOwner
 from or_audit.errors import AuditChainError, ScoreContractError, TaskContractError
 from or_audit.eval.agent import AgentPackage
 from or_audit.eval.bind import assert_bind
-from or_audit.eval.enums import ProjectionId
-from or_audit.eval.loader import dataset_task_paths, load_agent, load_dataset, load_task
+from or_audit.eval.loader import (
+    load_agent,
+    load_task,
+    load_taskset,
+    taskset_task_paths,
+)
 from or_audit.eval.registry import (
     DEFAULT_REGISTRY,
     load_registry,
@@ -155,16 +159,16 @@ def _tasks_describe(args: argparse.Namespace) -> int:
     return 0
 
 
-def _datasets_validate(args: argparse.Namespace) -> int:
-    """Load a dataset and every task it names."""
+def _tasksets_validate(args: argparse.Namespace) -> int:
+    """Load a taskset and every task it names."""
     try:
-        dataset = load_dataset(Path(args.path))
+        taskset = load_taskset(Path(args.path))
     except TaskContractError as exc:
         print(f"INVALID: {exc}", file=sys.stderr)
         return 1
     print(
-        f"valid: {dataset.id}@{dataset.dataset_version} "
-        f"{len(dataset.tasks)} task(s), headline {dataset.headline}"
+        f"valid: {taskset.id}@{taskset.taskset_version} "
+        f"{len(taskset.tasks)} task(s), headline {taskset.headline}"
     )
     return 0
 
@@ -172,7 +176,7 @@ def _datasets_validate(args: argparse.Namespace) -> int:
 def _registry_list(args: argparse.Namespace) -> int:
     try:
         index = load_registry(args.registry)
-        entries = index.datasets if args.registry_kind == "dataset" else index.agents
+        entries = index.tasksets if args.registry_kind == "taskset" else index.agents
         for entry in sorted(entries, key=lambda item: item.reference):
             print(f"{entry.reference}\t{entry.digest}\t{entry.repository}@{entry.ref}")
         return 0
@@ -200,12 +204,15 @@ def _agents_validate(args: argparse.Namespace) -> int:
     except TaskContractError as exc:
         print(f"INVALID: {exc}", file=sys.stderr)
         return 1
-    print(f"valid: {agent.id}@{agent.agent_version} port={agent.port.value}")
+    print(
+        f"valid: {agent.id}@{agent.agent_version} "
+        f"capabilities={','.join(cap.interface for cap in agent.capabilities)}"
+    )
     return 0
 
 
 def _bind(args: argparse.Namespace) -> int:
-    """Refuse a (task, agent) pair whose ports do not match."""
+    """Refuse a pair unless one agent capability satisfies the task interface."""
     try:
         task = load_task(Path(args.task))
         agent = load_agent(Path(args.agent))
@@ -213,7 +220,7 @@ def _bind(args: argparse.Namespace) -> int:
     except TaskContractError as exc:
         print(f"INCOMPATIBLE: {exc}", file=sys.stderr)
         return 1
-    print(f"bind: {agent.id} -> {task.id} port={task.port.id.value}")
+    print(f"bind: {agent.id} -> {task.id} interface={task.interface.id}")
     return 0
 
 
@@ -228,11 +235,11 @@ def _resolve_agent(spec: str, *, registry_source: str) -> tuple[AgentPackage, Pa
 
 
 def _run(args: argparse.Namespace) -> int:
-    """P1-P3: bind and run a task, dataset, or cartesian job.toml."""
-    n_sources = sum(bool(flag) for flag in (args.task, args.dataset, args.job))
+    """Bind and run a task, taskset, or cartesian job.toml."""
+    n_sources = sum(bool(flag) for flag in (args.task, args.taskset, args.job))
     if n_sources != 1:
         print(
-            "run requires exactly one of -t/--task, -d/--dataset, or -c/--job",
+            "run requires exactly one of -t/--task, -s/--taskset, or -c/--job",
             file=sys.stderr,
         )
         return 2
@@ -272,17 +279,17 @@ def _run(args: argparse.Namespace) -> int:
             )
             print(f"ran: {result.task_id} n={result.n} head {result.head}")
             return 0
-        dataset_path = Path(args.dataset)
-        if not dataset_path.exists() and "@" in args.dataset:
+        taskset_path = Path(args.taskset)
+        if not taskset_path.exists() and "@" in args.taskset:
             entry = resolve_entry(
                 load_registry(args.registry),
-                kind="dataset",
-                ref=args.dataset,
+                kind="taskset",
+                ref=args.taskset,
             )
-            dataset_path = materialize_entry(entry)
-        load_dataset(dataset_path)
+            taskset_path = materialize_entry(entry)
+        load_taskset(taskset_path)
         out_root = Path(args.out)
-        for task_path in dataset_task_paths(dataset_path):
+        for task_path in taskset_task_paths(taskset_path):
             task = load_task(task_path)
             task_dir = task_path if task_path.is_dir() else task_path.parent
             result = run_job(
@@ -328,13 +335,13 @@ def _replay(args: argparse.Namespace) -> int:
 
 
 def _export_rl(args: argparse.Namespace) -> int:
-    """Dump a versioned projection jsonl. Closed enum; recomputed from the vector."""
+    """Dump a task-declared versioned projection JSONL recomputed from vectors."""
     from or_audit.eval.export_rl import export_rl
 
     try:
         n = export_rl(
             Path(args.path),
-            projection_id=ProjectionId(args.projection),
+            projection_id=args.projection,
             out=Path(args.out),
         )
     except (TaskContractError, ScoreContractError) as exc:
@@ -412,19 +419,33 @@ def build_parser() -> argparse.ArgumentParser:
     tasks_describe.add_argument("path", help="task directory or task.toml")
     tasks_describe.set_defaults(func=_tasks_describe)
 
-    datasets = sub.add_parser("datasets", help="validate a dataset of eval tasks")
+    tasksets = sub.add_parser("tasksets", help="validate a versioned task collection")
+    tasksets_sub = tasksets.add_subparsers(dest="tasksets_command", required=True)
+    tasksets_validate = tasksets_sub.add_parser("validate", help="load a taskset and its tasks")
+    tasksets_validate.add_argument("path", help="taskset directory or taskset.toml")
+    tasksets_validate.set_defaults(func=_tasksets_validate)
+    tasksets_list = tasksets_sub.add_parser("list", help="list registry tasksets")
+    tasksets_list.add_argument("--registry", default=DEFAULT_REGISTRY)
+    tasksets_list.set_defaults(func=_registry_list, registry_kind="taskset")
+    tasksets_pull = tasksets_sub.add_parser("pull", help="pull a verified registry taskset")
+    tasksets_pull.add_argument("reference", help="org/name@version")
+    tasksets_pull.add_argument("--registry", default=DEFAULT_REGISTRY)
+    tasksets_pull.add_argument("--out", required=True)
+    tasksets_pull.set_defaults(func=_registry_pull, registry_kind="taskset")
+
+    datasets = sub.add_parser("datasets", help="compatibility alias for tasksets")
     datasets_sub = datasets.add_subparsers(dest="datasets_command", required=True)
-    datasets_validate = datasets_sub.add_parser("validate", help="load a dataset and its tasks")
-    datasets_validate.add_argument("path", help="dataset directory or dataset.toml")
-    datasets_validate.set_defaults(func=_datasets_validate)
-    datasets_list = datasets_sub.add_parser("list", help="list registry datasets")
+    datasets_validate = datasets_sub.add_parser("validate")
+    datasets_validate.add_argument("path")
+    datasets_validate.set_defaults(func=_tasksets_validate)
+    datasets_list = datasets_sub.add_parser("list")
     datasets_list.add_argument("--registry", default=DEFAULT_REGISTRY)
-    datasets_list.set_defaults(func=_registry_list, registry_kind="dataset")
-    datasets_pull = datasets_sub.add_parser("pull", help="pull a verified registry dataset")
-    datasets_pull.add_argument("reference", help="org/name@version")
+    datasets_list.set_defaults(func=_registry_list, registry_kind="taskset")
+    datasets_pull = datasets_sub.add_parser("pull")
+    datasets_pull.add_argument("reference")
     datasets_pull.add_argument("--registry", default=DEFAULT_REGISTRY)
     datasets_pull.add_argument("--out", required=True)
-    datasets_pull.set_defaults(func=_registry_pull, registry_kind="dataset")
+    datasets_pull.set_defaults(func=_registry_pull, registry_kind="taskset")
 
     agents = sub.add_parser("agents", help="validate an org/name agent package")
     agents_sub = agents.add_subparsers(dest="agents_command", required=True)
@@ -442,15 +463,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     bind = sub.add_parser(
         "bind",
-        help="check that an agent implements the port a task requires",
+        help="check that an agent capability satisfies a task interface",
     )
     bind.add_argument("task", help="task directory or task.toml")
     bind.add_argument("agent", help="agent directory or agent.toml")
     bind.set_defaults(func=_bind)
 
-    run = sub.add_parser("run", help="evaluate an agent on a task, dataset, or job.toml")
+    run = sub.add_parser("run", help="evaluate an agent on a task, taskset, or job.toml")
     run.add_argument("-t", "--task", help="task directory or task.toml")
-    run.add_argument("-d", "--dataset", help="dataset directory or dataset.toml")
+    run.add_argument("-s", "--taskset", "-d", "--dataset", help="taskset directory or taskset.toml")
     run.add_argument("-c", "--job", help="job.toml cartesian product of agents x tasks")
     run.add_argument("-a", "--agent", help="agent directory, or 'random' (required unless -c)")
     run.add_argument(
@@ -488,8 +509,7 @@ def build_parser() -> argparse.ArgumentParser:
     export_rl.add_argument(
         "--projection",
         required=True,
-        choices=[member.value for member in ProjectionId],
-        help="closed projection id; homemade floats are refused",
+        help="task-declared projection id; arbitrary code and stored floats are refused",
     )
     export_rl.add_argument("--out", required=True, help="jsonl output path")
     export_rl.set_defaults(func=_export_rl)

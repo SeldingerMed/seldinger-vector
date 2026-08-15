@@ -1,0 +1,22 @@
+{
+  "items": [
+    {
+      "id": "cf-001",
+      "preferred": "withdraw-and-reorient",
+      "unsafe": ["advance"],
+      "recovery_quality": 0.96
+    },
+    {
+      "id": "cf-002",
+      "preferred": "hold-and-image",
+      "unsafe": ["advance"],
+      "recovery_quality": 0.91
+    },
+    {
+      "id": "cf-003",
+      "preferred": "withdraw",
+      "unsafe": ["advance"],
+      "recovery_quality": 0.94
+    }
+  ]
+}

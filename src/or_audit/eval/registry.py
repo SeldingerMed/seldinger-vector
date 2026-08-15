@@ -1,4 +1,4 @@
-"""Versioned public registry for dataset and agent packages."""
+"""Versioned public registry for taskset and agent packages."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ import shutil
 import subprocess
 import urllib.request
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, ConfigDict, StringConstraints, model_validator
 
 from or_audit.errors import TaskContractError
 from or_audit.eval.integrity import tree_digest
@@ -37,17 +37,24 @@ RegistryVersion = Annotated[
 
 
 class RegistryEntry(BaseModel):
-    """One immutable dataset or agent package."""
+    """One immutable taskset or agent package."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    kind: Literal["dataset", "agent"]
+    kind: Literal["taskset", "agent"]
     id: RegistryId
     version: RegistryVersion
     repository: str
     ref: str
     path: str
     digest: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_dataset_kind(cls, raw: Any) -> Any:
+        if isinstance(raw, dict) and raw.get("kind") == "dataset":
+            return {**raw, "kind": "taskset"}
+        return raw
 
     @property
     def reference(self) -> str:
@@ -60,8 +67,21 @@ class RegistryIndex(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     format_version: Literal["1"]
-    datasets: tuple[RegistryEntry, ...] = ()
+    tasksets: tuple[RegistryEntry, ...] = ()
     agents: tuple[RegistryEntry, ...] = ()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_datasets(cls, raw: Any) -> Any:
+        if isinstance(raw, dict) and "tasksets" not in raw and "datasets" in raw:
+            data = dict(raw)
+            data["tasksets"] = data.pop("datasets")
+            return data
+        return raw
+
+    @property
+    def datasets(self) -> tuple[RegistryEntry, ...]:
+        return self.tasksets
 
 
 def load_registry(source: str = DEFAULT_REGISTRY) -> RegistryIndex:
@@ -83,18 +103,21 @@ def load_registry(source: str = DEFAULT_REGISTRY) -> RegistryIndex:
 def resolve_entry(
     index: RegistryIndex,
     *,
-    kind: Literal["dataset", "agent"],
+    kind: Literal["taskset", "dataset", "agent"],
     ref: str,
 ) -> RegistryEntry:
     """Resolve exact ``org/name@version`` identity; floating versions are refused."""
-    entries = index.datasets if kind == "dataset" else index.agents
+    canonical_kind = "taskset" if kind == "dataset" else kind
+    entries = index.tasksets if canonical_kind == "taskset" else index.agents
     matches = [entry for entry in entries if entry.reference == ref]
     if len(matches) != 1:
         known = ", ".join(sorted(entry.reference for entry in entries)) or "(none)"
         raise TaskContractError(f"unknown {kind} {ref!r}; known: {known}")
     entry = matches[0]
-    if entry.kind != kind:
-        raise TaskContractError(f"registry entry {ref} has kind={entry.kind}, expected {kind}")
+    if entry.kind != canonical_kind:
+        raise TaskContractError(
+            f"registry entry {ref} has kind={entry.kind}, expected {canonical_kind}"
+        )
     return entry
 
 

@@ -1,8 +1,19 @@
-format_version = "1"
+format_version = "2"
 id = "seldingermed/cath-seg"
 agent_version = "0"
-port = "video-predict"
 kind = "frozen-model"
 weights_pin = "b62b36f8c5ca0216c8294e35c64de0c47853b7638db838517c751f7835e7c194"
 weights_path = "weights.json"
+
+[[capabilities]]
+interface = "video-predict"
+interaction_modes = ["single-turn"]
+protocol_versions = ["1"]
+observations = ["dsa-sequence"]
+outputs = ["release-audit"]
+
+[runtime]
+kind = "local"
+protocol_version = "1"
 entrypoint = "predictor.py:load_predictor"
+timeout_sec = 600.0

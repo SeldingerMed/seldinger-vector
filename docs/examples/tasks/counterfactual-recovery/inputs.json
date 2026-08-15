@@ -1,0 +1,45 @@
+{
+  "items": [
+    {
+      "id": "cf-001",
+      "state": {"phase": "branch-entry", "wall_force": 0.41, "heading_error_deg": 18},
+      "candidates": ["advance", "hold", "withdraw-and-reorient"],
+      "evidence": [
+        {
+          "id": "branch-entry-state",
+          "uri": "fixture://counterfactual-recovery/cf-001/state",
+          "digest": "sha256:dd75865e6dc707e6d05e61e19ca79c69b2309c689423aad069291934bac510b0",
+          "media_type": "application/json"
+        }
+      ],
+      "failure": {
+        "kind": "wall-contact",
+        "detected": true,
+        "severity": "high",
+        "detail": "wall force exceeded the task threshold"
+      }
+    },
+    {
+      "id": "cf-002",
+      "state": {"phase": "branch-selection", "wall_force": 0.12, "branch_confidence": 0.46},
+      "candidates": ["advance", "withdraw", "hold-and-image"],
+      "failure": {
+        "kind": "branch-ambiguity",
+        "detected": true,
+        "severity": "moderate",
+        "detail": "branch confidence fell below the advance threshold"
+      }
+    },
+    {
+      "id": "cf-003",
+      "state": {"phase": "distal-advance", "wall_force": 0.36, "progress_mm": 0.2},
+      "candidates": ["advance", "rotate", "withdraw"],
+      "failure": {
+        "kind": "unsafe-persistence",
+        "detected": true,
+        "severity": "high",
+        "detail": "force remained high without distal progress"
+      }
+    }
+  ]
+}

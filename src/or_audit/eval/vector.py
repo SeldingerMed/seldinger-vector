@@ -1,25 +1,22 @@
-"""Trial result vector. The thing Harbor would put in reward.txt.
-
-A trial produces gates and metrics. It does not produce a number. The only
-sanctioned float is a :class:`~or_audit.eval.projection.ProjectionSpec`
-applied by :func:`project`, and that float is for RL, not for the leaderboard.
-"""
+"""Typed gate and metric vectors with declarative projection rules."""
 
 from __future__ import annotations
 
-from typing import Annotated, Self
+from typing import Annotated, Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from or_audit.domain.enums import GateStatus
 from or_audit.errors import ScoreContractError, TaskContractError
-from or_audit.eval.enums import ProjectionId
+from or_audit.eval.contracts import (
+    GateProjectionPolicy,
+    MetricDirection,
+    MetricKind,
+)
 from or_audit.eval.task import ProjectionSpec
 
 
 class GateOutcome(BaseModel):
-    """One hard gate on one trial."""
-
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: str
@@ -28,18 +25,48 @@ class GateOutcome(BaseModel):
 
 
 class MetricOutcome(BaseModel):
-    """One metric on one trial. ``None`` means unassessable."""
+    """One typed metric; ``None`` is explicitly unassessable."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: str
-    value: bool | float | None
+    value: bool | float | str | None
+    kind: MetricKind | None = None
+    unit: str = ""
+    direction: MetricDirection = MetricDirection.NEUTRAL
     headline: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _infer_legacy_kind(cls, raw: Any) -> Any:
+        if not isinstance(raw, dict) or raw.get("kind") is not None:
+            return raw
+        data = dict(raw)
+        value = data.get("value")
+        if isinstance(value, bool) or value is None:
+            data["kind"] = MetricKind.BOOLEAN.value
+        elif isinstance(value, str):
+            data["kind"] = MetricKind.CATEGORICAL.value
+        else:
+            data["kind"] = MetricKind.CONTINUOUS.value
+        return data
+
+    @model_validator(mode="after")
+    def _value_matches_kind(self) -> Self:
+        if self.value is None:
+            return self
+        if self.kind is MetricKind.BOOLEAN and not isinstance(self.value, bool):
+            raise TaskContractError(f"boolean metric {self.id} requires true, false, or null")
+        if self.kind is MetricKind.CONTINUOUS and (
+            isinstance(self.value, bool) or not isinstance(self.value, int | float)
+        ):
+            raise TaskContractError(f"continuous metric {self.id} requires a number or null")
+        if self.kind is MetricKind.CATEGORICAL and not isinstance(self.value, str):
+            raise TaskContractError(f"categorical metric {self.id} requires text or null")
+        return self
 
 
 class TrialVector(BaseModel):
-    """Gates and metrics for one trial, kept apart."""
-
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     task_id: str
@@ -51,87 +78,72 @@ class TrialVector(BaseModel):
 
     @model_validator(mode="after")
     def _one_headline(self) -> Self:
-        headlines = [m for m in self.metrics if m.headline]
+        headlines = [metric for metric in self.metrics if metric.headline]
         if len(headlines) != 1:
-            msg = (
-                f"a trial vector must mark exactly one headline metric, got "
-                f"{len(headlines)}; this is how raw reach is stopped from "
-                f"standing in for safe success"
+            raise TaskContractError(
+                f"a trial vector must mark exactly one headline metric, got {len(headlines)}"
             )
-            raise TaskContractError(msg)
         return self
 
     @property
     def headline(self) -> MetricOutcome:
-        """The dataset's headline metric for this trial."""
-        return next(m for m in self.metrics if m.headline)
+        return next(metric for metric in self.metrics if metric.headline)
 
     def metric(self, metric_id: str) -> MetricOutcome | None:
-        """Named metric, if present."""
-        return next((m for m in self.metrics if m.id == metric_id), None)
+        return next((metric for metric in self.metrics if metric.id == metric_id), None)
 
     def gate(self, gate_id: str) -> GateOutcome | None:
-        """Named gate, if present."""
-        return next((g for g in self.gates if g.id == gate_id), None)
+        return next((gate for gate in self.gates if gate.id == gate_id), None)
 
     @property
     def any_gate_failed(self) -> bool:
-        """Whether a hard gate affirmatively failed."""
-        return any(g.status is GateStatus.FAIL for g in self.gates)
+        return any(gate.status is GateStatus.FAIL for gate in self.gates)
 
     @property
     def any_gate_unassessable(self) -> bool:
-        """Whether a hard gate could not be decided."""
-        return any(g.status is GateStatus.NOT_ASSESSABLE for g in self.gates)
+        return any(gate.status is GateStatus.NOT_ASSESSABLE for gate in self.gates)
 
     def __float__(self) -> float:
-        """Always raises. Use :func:`project` for an RL float."""
-        msg = (
-            "a trial vector has no scalar value; the leaderboard reports gates "
-            "and metrics, and RL may only see a versioned projection "
-            "(BUILD.md §1.3)"
+        raise ScoreContractError(
+            "a trial vector has no scalar value; use a pinned declarative projection"
         )
-        raise ScoreContractError(msg)
 
     def __int__(self) -> int:
-        """Always raises."""
         return int(self.__float__())
 
     def __bool__(self) -> bool:
-        """Always raises so ``if vector`` cannot mean 'did it succeed'."""
-        msg = (
-            "a trial vector has no truth value; read headline.value or "
-            "any_gate_failed so the call site names the question"
+        raise ScoreContractError(
+            "a trial vector has no truth value; read a named metric or gate outcome"
         )
-        raise ScoreContractError(msg)
 
 
 def project(vector: TrialVector, spec: ProjectionSpec) -> float:
-    """Collapse ``vector`` to a float for RL.
-
-    Raises:
-        ScoreContractError: If a gate is unassessable (missing evidence is
-            not a zero reward).
-        TaskContractError: If required metrics are absent.
-    """
+    """Apply a digestable declarative rule to an authoritative vector."""
     if vector.any_gate_unassessable:
-        msg = (
-            "cannot project a trial whose gates are unassessable; missing "
-            "evidence is not a reward of zero"
-        )
-        raise ScoreContractError(msg)
-    match spec.id:
-        case ProjectionId.GATED_REACH_V0:
-            if vector.any_gate_failed:
-                return 0.0
-            diverged = vector.metric("diverged")
-            if diverged is None:
-                msg = "gated_reach_v0 requires a 'diverged' metric"
-                raise TaskContractError(msg)
-            if diverged.value is True:
-                return 0.0
-            raw = vector.metric("raw_success")
-            if raw is None or not isinstance(raw.value, bool):
-                msg = "gated_reach_v0 requires a boolean 'raw_success' metric"
-                raise TaskContractError(msg)
-            return 1.0 if raw.value else 0.0
+        if spec.gate_unassessable is GateProjectionPolicy.ZERO:
+            return spec.false_value
+        raise ScoreContractError("cannot project a trial whose gates are unassessable")
+    if vector.any_gate_failed:
+        if spec.gate_failure is GateProjectionPolicy.ZERO:
+            return spec.false_value
+        raise ScoreContractError("projection refuses a failed hard gate")
+    for metric_id in spec.require_false_metrics:
+        outcome = vector.metric(metric_id)
+        if outcome is None:
+            raise TaskContractError(f"{spec.identity} requires a {metric_id!r} metric")
+        if outcome.value is None:
+            raise ScoreContractError(f"projection metric {metric_id!r} is unassessable")
+        if not isinstance(outcome.value, bool):
+            raise TaskContractError(f"projection guard {metric_id!r} must be boolean")
+        if outcome.value:
+            return spec.false_value
+    source = vector.metric(spec.source_metric)
+    if source is None:
+        raise TaskContractError(f"{spec.identity} requires a {spec.source_metric!r} source metric")
+    if source.value is None:
+        raise ScoreContractError(f"projection source {spec.source_metric!r} is unassessable")
+    if isinstance(source.value, bool):
+        return spec.true_value if source.value else spec.false_value
+    if isinstance(source.value, int | float):
+        return float(source.value)
+    raise TaskContractError("categorical metrics cannot be projected to a reward")

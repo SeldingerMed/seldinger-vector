@@ -1,20 +1,16 @@
-"""Run a bound (task, agent) pair into a job directory.
-
-P1: gym-policy (Lumen when installed; tests inject a factory).
-P2: video-predict (labels vs JSON; AngioStress adds a claim footer).
-P3: cartesian jobs and trajectory reconstitution live beside this module.
-"""
+"""Execute bound task and agent packages through v0.3 harness interaction modes."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, assert_never
+from typing import Any
 
 from or_audit.audit.canonical import digest
 from or_audit.errors import TaskContractError
 from or_audit.eval.agent import AgentPackage
 from or_audit.eval.bind import assert_bind
+from or_audit.eval.contracts import InteractionMode, legacy_capability
 from or_audit.eval.enums import AgentKind, PortId, WorldKind
 from or_audit.eval.gym_world import GymFactory, make_gym, run_gym_episode, sample_action
 from or_audit.eval.integrity import tree_digest
@@ -29,24 +25,35 @@ from or_audit.eval.job import (
     resolve_bundle_path,
     write_job,
 )
-from or_audit.eval.plugins import load_policy_runtime, load_predictor_runtime
+from or_audit.eval.plugins import (
+    load_policy_runtime,
+    load_predictor_runtime,
+    load_verifier_runtime,
+)
 from or_audit.eval.predict import index_items, load_claim_footer, load_items
 from or_audit.eval.reconstitute import assert_trajectory_matches_vector
 from or_audit.eval.task import TaskSpec
+from or_audit.eval.trace import ProceduralTrace
 from or_audit.eval.vector import project
 from or_audit.eval.verifier import score_context
 
 SAFETY_MAX_PEN = 0.3
 
 
+def _close(runtime: object | None) -> None:
+    close = getattr(runtime, "close", None)
+    if callable(close):
+        close()
+
+
 def builtin_random_agent() -> AgentPackage:
-    """``-a random`` — gym-policy baseline, no weights."""
     return AgentPackage(
         format_version="1",
         id="seldingermed/random",
         agent_version="0",
         port=PortId.GYM_POLICY,
-        kind=AgentKind.RANDOM,
+        kind=AgentKind.RANDOM.value,
+        capabilities=(legacy_capability(PortId.GYM_POLICY.value),),
     )
 
 
@@ -60,7 +67,6 @@ def run_job(
     n: int | None = None,
     gym_factory: GymFactory | None = None,
 ) -> JobResult:
-    """Bind, run, write a job directory, return the :class:`JobResult`."""
     assert_bind(task, agent)
     task.assert_runnable()
     task_package_digest = tree_digest(task_dir)
@@ -69,11 +75,10 @@ def run_job(
     )
     episodes = n if n is not None else task.environment.n_eval_episodes
     if episodes < 1:
-        msg = f"n must be >= 1, got {episodes}"
-        raise TaskContractError(msg)
-    extra: dict[str, Any] = {}
-    if task.port.id is PortId.GYM_POLICY:
-        result, safety = _run_gym(
+        raise TaskContractError(f"n must be >= 1, got {episodes}")
+    extra: dict[str, Any] = {"interaction_mode": task.harness.interaction_mode.value}
+    if task.harness.interaction_mode is InteractionMode.CLOSED_LOOP:
+        result, safety = _run_closed_loop(
             task=task,
             task_dir=task_dir,
             agent=agent,
@@ -84,8 +89,8 @@ def run_job(
             gym_factory=gym_factory,
         )
         extra["safety_max_pen"] = safety
-    elif task.port.id is PortId.VIDEO_PREDICT:
-        result = _run_predict(
+    elif task.harness.interaction_mode is InteractionMode.SINGLE_TURN:
+        result = _run_single_turn(
             task=task,
             task_dir=task_dir,
             agent=agent,
@@ -94,31 +99,47 @@ def run_job(
             agent_digest=agent_package_digest,
             n=episodes,
         )
-    else:
-        assert_never(task.port.id)
+    elif task.harness.interaction_mode is InteractionMode.INTERACTIVE:
+        result = _run_interactive(
+            task=task,
+            task_dir=task_dir,
+            agent=agent,
+            agent_dir=agent_dir,
+            task_digest=task_package_digest,
+            agent_digest=agent_package_digest,
+            n=episodes,
+        )
+    elif task.harness.interaction_mode is InteractionMode.COUNTERFACTUAL:
+        result = _run_counterfactual(
+            task=task,
+            task_dir=task_dir,
+            agent=agent,
+            agent_dir=agent_dir,
+            task_digest=task_package_digest,
+            agent_digest=agent_package_digest,
+            n=episodes,
+        )
+    else:  # pragma: no cover - enum exhaustiveness
+        raise TaskContractError(f"unsupported harness mode {task.harness.interaction_mode}")
     config = {
+        "format_version": "2",
         "task_id": task.id,
         "task_dir": "bundle/task",
         "agent_id": agent.id,
         "agent_dir": "bundle/agent" if agent_dir is not None else None,
         "task_digest": task_package_digest,
         "agent_digest": agent_package_digest,
+        "runtime_identity": agent.runtime_identity,
         "n": result.n,
         "world_pin": task.environment.world_pin,
-        "port": task.port.id.value,
+        "interface": task.interface.id,
         **extra,
     }
-    write_job(
-        out,
-        config=config,
-        result=result,
-        task_dir=task_dir,
-        agent_dir=agent_dir,
-    )
+    write_job(out, config=config, result=result, task_dir=task_dir, agent_dir=agent_dir)
     return result
 
 
-def _run_gym(
+def _run_closed_loop(
     *,
     task: TaskSpec,
     task_dir: Path,
@@ -129,54 +150,114 @@ def _run_gym(
     agent_digest: str,
     gym_factory: GymFactory | None,
 ) -> tuple[JobResult, float]:
-    if agent.kind not in {AgentKind.RANDOM, AgentKind.POLICY}:
-        msg = f"gym-policy runner does not implement kind={agent.kind.value}"
-        raise TaskContractError(msg)
+    if agent.kind not in {AgentKind.RANDOM.value, AgentKind.POLICY.value}:
+        raise TaskContractError(f"closed-loop runner does not implement kind={agent.kind}")
     policy = None
-    if agent.kind is AgentKind.POLICY:
+    if agent.kind == AgentKind.POLICY.value:
         if agent_dir is None:
             raise TaskContractError(f"policy agent {agent.id} has no package directory")
-        policy = load_policy_runtime(agent_dir, agent.entrypoint, agent.weights_path)
-
+        policy = load_policy_runtime(agent_dir, agent.entrypoint, agent.weights_path, agent.runtime)
+    verifier = load_verifier_runtime(task_dir, task.verifier.entrypoint)
     factory: GymFactory = gym_factory or make_gym
     env = factory(task)
     identity = agent_identity(agent)
     unwrapped = getattr(env, "unwrapped", env)
     nested = getattr(unwrapped, "_env", unwrapped)
     safety = float(getattr(nested, "safety_max_pen", SAFETY_MAX_PEN))
-
-    trials: list[TrialRecord] = []
-    for seed in range(n):
-        if policy is not None:
-            policy.reset(seed=seed)
-
-        def action_fn(world: Any, observation: Any, step: int, *, episode_seed: int = seed) -> Any:
-            if policy is None:
-                return sample_action(world, seed=episode_seed, step=step)
-            return policy.act(observation, step=step)
-
-        info, trajectory = run_gym_episode(env, seed=seed, action_fn=action_fn)
-        vector = score_context(
-            task=task,
-            task_dir=task_dir,
-            agent_identity=identity,
-            seed=seed,
-            context={
-                "kind": "gym-policy",
-                "info": info,
-                "trajectory": trajectory,
-                "safety_max_pen": safety,
-            },
-        )
-        projection = project(vector, task.projection) if task.projection is not None else None
-        trials.append(
-            TrialRecord(
-                seed=seed,
-                vector=vector,
-                trajectory=trajectory,
-                projection=projection,
+    trials = []
+    try:
+        for seed in range(n):
+            if policy is not None:
+                policy.reset(seed=seed)
+            scenario = next(
+                (candidate for candidate in task.scenarios if candidate.seed == seed),
+                None,
             )
-        )
+            perturbations = tuple(
+                perturbation
+                for perturbation in task.perturbations
+                if perturbation.scenario_id is None
+                or (scenario is not None and perturbation.scenario_id == scenario.id)
+            )
+            reset_options = (
+                {
+                    "or_audit": {
+                        "scenario": (
+                            scenario.model_dump(mode="json") if scenario is not None else None
+                        ),
+                        "perturbations": [
+                            perturbation.model_dump(mode="json") for perturbation in perturbations
+                        ],
+                    }
+                }
+                if scenario is not None or perturbations
+                else None
+            )
+
+            def action_fn(
+                world: Any,
+                observation: Any,
+                step: int,
+                *,
+                episode_seed: int = seed,
+            ) -> Any:
+                if policy is None:
+                    return sample_action(world, seed=episode_seed, step=step)
+                return policy.act(observation, step=step)
+
+            info, steps = run_gym_episode(
+                env,
+                seed=seed,
+                action_fn=action_fn,
+                max_steps=task.harness.max_steps,
+                reset_options=reset_options,
+            )
+            trace_steps = []
+            for index, raw_step in enumerate(steps):
+                trace_step = dict(raw_step)
+                if index == 0 and scenario is not None:
+                    trace_step["scenario"] = scenario
+                active_perturbations = tuple(
+                    perturbation
+                    for perturbation in perturbations
+                    if (
+                        perturbation.at_step == index
+                        or (perturbation.at_step is None and index == 0)
+                    )
+                )
+                if active_perturbations:
+                    trace_step["perturbations"] = active_perturbations
+                trace_steps.append(trace_step)
+            trace = ProceduralTrace.from_steps(
+                trace_steps,
+                mode=InteractionMode.CLOSED_LOOP,
+            )
+            vector = score_context(
+                task=task,
+                task_dir=task_dir,
+                agent_identity=identity,
+                seed=seed,
+                context={
+                    "kind": "gym-policy",
+                    "info": info,
+                    "trajectory": list(trace),
+                    "safety_max_pen": safety,
+                },
+                runtime=verifier,
+            )
+            projection = project(vector, task.projection) if task.projection else None
+            trials.append(
+                TrialRecord(
+                    seed=seed,
+                    vector=vector,
+                    trajectory=trace,
+                    projection=projection,
+                    projection_spec_digest=(task.projection.rule_digest if task.projection else ""),
+                )
+            )
+    finally:
+        _close(policy)
+        _close(verifier)
     return (
         assemble_job_result(
             task=task,
@@ -189,52 +270,104 @@ def _run_gym(
     )
 
 
-def _run_predict(
+def _run_predictions(
     *,
     task: TaskSpec,
     task_dir: Path,
     agent: AgentPackage,
     agent_dir: Path | None,
-    n: int,
     task_digest: str,
     agent_digest: str,
+    n: int,
+    mode: InteractionMode,
 ) -> JobResult:
-    inputs = load_items(task_dir / task.environment.inputs_path)
-    labels = index_items(load_items(task_dir / task.environment.labels_path))
     if agent_dir is None:
         raise TaskContractError(f"agent {agent.id} has no package directory")
-    predictor = load_predictor_runtime(agent_dir, agent.entrypoint, agent.weights_path)
+    inputs = load_items(task_dir / task.environment.inputs_path)
+    labels = index_items(load_items(task_dir / task.environment.labels_path))
+    predictor = load_predictor_runtime(
+        agent_dir, agent.entrypoint, agent.weights_path, agent.runtime
+    )
+    verifier = load_verifier_runtime(task_dir, task.verifier.entrypoint)
     identity = agent_identity(agent)
-    items = inputs[:n]
-    trials: list[TrialRecord] = []
-    for seed, item in enumerate(items):
-        item_id = str(item["id"])
-        if item_id not in labels:
-            raise TaskContractError(f"task {task.id} has no label for item {item_id!r}")
-        prediction = predictor.predict(item)
-        if not isinstance(prediction, dict):
-            raise TaskContractError(f"agent {agent.id} prediction for {item_id!r} is not an object")
-        label = labels[item_id]
-        context = {
-            "kind": "video-predict",
-            "input": item,
-            "label": label,
-            "prediction": prediction,
-        }
-        vector = score_context(
-            task=task,
-            task_dir=task_dir,
-            agent_identity=identity,
-            seed=seed,
-            context=context,
-        )
-        trials.append(
-            TrialRecord(
-                seed=seed,
-                vector=vector,
-                trajectory=(context,),
+    trials = []
+    try:
+        for seed, item in enumerate(inputs[:n]):
+            item_id = str(item["id"])
+            if item_id not in labels:
+                raise TaskContractError(f"task {task.id} has no label for item {item_id!r}")
+            prediction = predictor.predict(item)
+            context_kind = (
+                "counterfactual" if mode is InteractionMode.COUNTERFACTUAL else "video-predict"
             )
-        )
+            context = {
+                "kind": context_kind,
+                "input": item,
+                "label": labels[item_id],
+                "prediction": prediction,
+            }
+            vector = score_context(
+                task=task,
+                task_dir=task_dir,
+                agent_identity=identity,
+                seed=seed,
+                context=context,
+                runtime=verifier,
+            )
+            trace_payload: dict[str, Any] = {
+                **context,
+                "obs": item,
+                "output": prediction,
+                "transition": {"oracle_evidence": labels[item_id]},
+            }
+            scenario = next(
+                (
+                    candidate
+                    for candidate in task.scenarios
+                    if candidate.inputs.get("item") == item_id
+                ),
+                None,
+            )
+            perturbations = tuple(
+                perturbation
+                for perturbation in task.perturbations
+                if perturbation.scenario_id is None
+                or (scenario is not None and perturbation.scenario_id == scenario.id)
+            )
+            if scenario is not None:
+                trace_payload["scenario"] = scenario
+            if perturbations:
+                trace_payload["perturbations"] = perturbations
+            if isinstance(prediction.get("uncertainty"), int | float):
+                trace_payload["uncertainty"] = prediction["uncertainty"]
+            if isinstance(prediction.get("abstain"), bool):
+                trace_payload["abstained"] = prediction["abstain"]
+            for event_name in (
+                "evidence",
+                "failure",
+                "recovery",
+                "handoff",
+                "tool",
+                "timing",
+            ):
+                if event_name in prediction:
+                    trace_payload[event_name] = prediction[event_name]
+                elif event_name in item:
+                    trace_payload[event_name] = item[event_name]
+            trace = ProceduralTrace.from_steps([trace_payload], mode=mode)
+            projection = project(vector, task.projection) if task.projection else None
+            trials.append(
+                TrialRecord(
+                    seed=seed,
+                    vector=vector,
+                    trajectory=trace,
+                    projection=projection,
+                    projection_spec_digest=(task.projection.rule_digest if task.projection else ""),
+                )
+            )
+    finally:
+        _close(predictor)
+        _close(verifier)
     footer = ""
     if task.environment.kind is WorldKind.ANGIOSTRESS_CONTRACT:
         footer = load_claim_footer(task_dir / task.environment.contract_path)
@@ -248,6 +381,138 @@ def _run_predict(
     )
 
 
+def _run_single_turn(**kwargs: Any) -> JobResult:
+    return _run_predictions(**kwargs, mode=InteractionMode.SINGLE_TURN)
+
+
+def _run_interactive(
+    *,
+    task: TaskSpec,
+    task_dir: Path,
+    agent: AgentPackage,
+    agent_dir: Path | None,
+    task_digest: str,
+    agent_digest: str,
+    n: int,
+) -> JobResult:
+    if agent_dir is None:
+        raise TaskContractError(f"agent {agent.id} has no package directory")
+    inputs = load_items(task_dir / task.environment.inputs_path)
+    labels = index_items(load_items(task_dir / task.environment.labels_path))
+    predictor = load_predictor_runtime(
+        agent_dir,
+        agent.entrypoint,
+        agent.weights_path,
+        agent.runtime,
+    )
+    verifier = load_verifier_runtime(task_dir, task.verifier.entrypoint)
+    identity = agent_identity(agent)
+    trials = []
+    try:
+        for seed, item in enumerate(inputs[:n]):
+            item_id = str(item["id"])
+            if item_id not in labels:
+                raise TaskContractError(f"task {task.id} has no label for item {item_id!r}")
+            turns = item.get("turns")
+            if not isinstance(turns, list) or not turns:
+                raise TaskContractError(
+                    f"interactive task {task.id} item {item_id!r} needs non-empty turns"
+                )
+            if len(turns) > task.harness.max_steps:
+                raise TaskContractError(
+                    f"interactive task {task.id} item {item_id!r} has {len(turns)} turns, "
+                    f"above max_steps={task.harness.max_steps}"
+                )
+            history: list[dict[str, Any]] = []
+            trace_payloads: list[dict[str, Any]] = []
+            for turn_index, observation in enumerate(turns):
+                request = {
+                    "id": item_id,
+                    "turn": observation,
+                    "turn_index": turn_index,
+                    "history": history,
+                }
+                prediction = predictor.predict(request)
+                history.append({"observation": observation, "output": prediction})
+                trace_payload: dict[str, Any] = {
+                    "kind": "interactive",
+                    "obs": observation,
+                    "output": prediction,
+                    "transition": {"history_length": len(history)},
+                }
+                if isinstance(prediction.get("uncertainty"), int | float):
+                    trace_payload["uncertainty"] = prediction["uncertainty"]
+                if isinstance(prediction.get("abstain"), bool):
+                    trace_payload["abstained"] = prediction["abstain"]
+                for event_name in (
+                    "evidence",
+                    "failure",
+                    "recovery",
+                    "handoff",
+                    "tool",
+                    "timing",
+                ):
+                    if event_name in prediction:
+                        trace_payload[event_name] = prediction[event_name]
+                trace_payloads.append(trace_payload)
+                if prediction.get("done") is True:
+                    break
+            final_prediction = history[-1]["output"]
+            context = {
+                "kind": "interactive",
+                "input": item,
+                "label": labels[item_id],
+                "prediction": final_prediction,
+                "history": history,
+            }
+            trace_payloads[-1].update(context)
+            trace_payloads[-1]["transition"] = {
+                "history_length": len(history),
+                "terminal": True,
+                "oracle_evidence": labels[item_id],
+            }
+            vector = score_context(
+                task=task,
+                task_dir=task_dir,
+                agent_identity=identity,
+                seed=seed,
+                context=context,
+                runtime=verifier,
+            )
+            trace = ProceduralTrace.from_steps(
+                trace_payloads,
+                mode=InteractionMode.INTERACTIVE,
+            )
+            projection = project(vector, task.projection) if task.projection else None
+            trials.append(
+                TrialRecord(
+                    seed=seed,
+                    vector=vector,
+                    trajectory=trace,
+                    projection=projection,
+                    projection_spec_digest=(task.projection.rule_digest if task.projection else ""),
+                )
+            )
+    finally:
+        _close(predictor)
+        _close(verifier)
+    footer = ""
+    if task.environment.kind is WorldKind.ANGIOSTRESS_CONTRACT:
+        footer = load_claim_footer(task_dir / task.environment.contract_path)
+    return assemble_job_result(
+        task=task,
+        agent=agent,
+        trials=tuple(trials),
+        task_digest=task_digest,
+        agent_digest=agent_digest,
+        claim_footer=footer,
+    )
+
+
+def _run_counterfactual(**kwargs: Any) -> JobResult:
+    return _run_predictions(**kwargs, mode=InteractionMode.COUNTERFACTUAL)
+
+
 def replay_job(
     out: Path,
     *,
@@ -255,7 +520,6 @@ def replay_job(
     load_agent: Callable[[Path], AgentPackage],
     gym_factory: GymFactory | None = None,
 ) -> JobResult:
-    """Re-run a job from its config and check the head."""
     config = read_job_config(out)
     previous = read_job_result(out)
     task_dir = resolve_bundle_path(out, config["task_dir"], label="task")
@@ -290,12 +554,7 @@ def replay_job(
         gym_factory=gym_factory,
     )
     if rerun.head != previous.head:
-        msg = (
-            f"replay head mismatch: stored {previous.head} reran {rerun.head}; "
-            f"a published row must replay (BUILD.md §1.3)"
-        )
-        raise TaskContractError(msg)
+        raise TaskContractError(f"replay head mismatch: stored {previous.head} reran {rerun.head}")
     if compute_head(rerun) != rerun.head:
-        msg = "rerun stamped a head that does not match its payload"
-        raise TaskContractError(msg)
+        raise TaskContractError("rerun stamped a head that does not match its payload")
     return rerun

@@ -1,0 +1,10 @@
+format_version = "2"
+id = "seldingermed/counterfactual-recovery"
+taskset_version = "1"
+headline = "correct_intervention"
+phi_class = "procedural"
+description = "Pinned counterfactual recovery scenarios for consequence-ranking world models."
+
+tasks = [
+  "../../tasks/counterfactual-recovery",
+]

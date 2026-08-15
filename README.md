@@ -1,90 +1,50 @@
 # OR-Audit
 
-Vector verifier and attestation kernel for procedural skill, safety, and
-technical-AI evaluation.
+Independent evaluation infrastructure for procedural medical AI.
 
-> **Status: v0.2 alpha.** Runnable Harbor analog for procedural-medical model
-> evaluation: immutable `org/name@version` packages, real physics and frozen-model
-> execution, portable replay, and vector scorecards that cannot hide injury inside
-> a reach metric. Evals are infinite: procedures remain task submissions, not kernel
-> enums. Agents bind to tasks through two ports: `gym-policy` and `video-predict`.
->
-> - **Wedge (this is the product):** [`docs/BUILD.md`](docs/BUILD.md) — independent,
->   reproducible evaluation. The public registry is
->   [`SeldingerMed/seldinger-tasks`](https://github.com/SeldingerMed/seldinger-tasks).
-> - **Gated mode:** [`docs/PLAN.md`](docs/PLAN.md) — named-surgeon
->   credentialing. Phase 0 is **not** cleared and does **not** block the wedge.
-> - **Context:** [`docs/ASSESSMENT.md`](docs/ASSESSMENT.md) — straw-man /
->   steel-man and pre-deployment test layers.
->
-> Kernel invariants (no scalar collapse, required abstention, de-id as a gate,
-> pinned audit chain) are shared. Nothing here is a validated product or
-> legal, regulatory, or clinical advice.
+OR-Audit binds versioned task interfaces to declared agent capabilities, executes agents and task-owned verifiers in separate processes, and writes replayable vector evidence. The v0.3 kernel supports closed-loop policies, multi-turn interactive agents, structured single-turn models, and counterfactual world models without adding procedure-specific runner branches.
 
-## What this is
+## Core model
 
-A harness that takes a procedural episode (today: synthetic endoscopic video;
-intended: sim, public video, de-identified clinical video), runs it through
-hard safety gates and soft skill metrics that **cannot be averaged into each
-other**, and emits a versioned, contestable artifact.
+| Object | Contract |
+|---|---|
+| Task | `instruction.md` + pinned world + `InterfaceSpec` + `HarnessSpec` + task-owned verifier |
+| Taskset | Versioned collection of tasks with one declared headline metric |
+| Agent | `org/name@version` package with one or more `CapabilitySpec` declarations and a pinned runtime descriptor |
+| Trial | Typed `ProceduralTrace` + hard gates + typed metrics + optional declarative projection |
+| Job | Cartesian product or one bound task-agent pair with portable package copies and a content head |
 
-The product is the Harbor-shaped eval harness in `BUILD.md`: a sandbox that
-services submitted `(dataset, agent)` pairs. Who the subject is (model vs
-surgeon) is a mode. Which procedure is **not** a kernel type — it is whatever
-task someone published. `or-audit bind` is the first Harbor verb that decides
-whether `seldingermed/lumen-linear` and `acme/cabg-vlm` can even be scored on a
-given task.
+Interfaces state required interaction mode, protocol version, observation schemas, action/output schemas, and features. Interface IDs and agent kinds are package-authored slugs; capabilities must satisfy every requirement. Binding never switches on procedure names or a closed agent taxonomy.
 
-The thesis that survives both readings is **not** "we can score robotic
-surgery" — vendors already do that — but that an independent *vector*
-verifier, able to abstain, is worth paying for when self-issued scores are
-structurally conflicted. Who the subject is (surgeon vs policy) is a mode,
-not a rewrite.
+Four harness modes are implemented:
 
-## Architectural commitments
+- `closed-loop`: observation → action → world transition.
+- `interactive`: ordered observations → stateful multi-turn outputs → terminal scoring context.
+- `single-turn`: task input → structured output, including abstention and uncertainty.
+- `counterfactual`: procedural state + candidate interventions → consequence ranking or prediction.
 
-These are enforced in code, not left to convention. They come straight from the
-plan and should not be relaxed without amending it.
+Every mode emits the same typed trace vocabulary: observations, outputs, actions, transitions, safety state, uncertainty, failure, recovery, handoff, tool events, timing, and evidence references.
 
-| Commitment | Where | Why |
-|---|---|---|
-| Video is required; kinematics never blocks | `domain.Episode` | Kinematics is vendor-gated (V-1). A cross-platform scorer cannot depend on a signal controlled by the parties it competes with. |
-| De-identification is a gate, not a flag | `domain.MediaAsset.require_readable` | Only attested media may reach perception, scoring, reporting, or export (§8). |
-| The score vector never implicitly collapses | `scoring.ScoreVector` | Hard safety gates must not average into soft skill scores (§7.1). |
-| Abstention is a required output class | `Determination.INDETERMINATE`, `GateStatus.NOT_ASSESSABLE` | A scorer that cannot decline gets forced into false confidence where liability concentrates (§7.2). |
-| Every artifact is versioned and chained | `audit.AuditTrail` | The record must be defensible under challenge (§7.3). |
-| Attestation requires bytes, not assertion | `deid.redact` | The pipeline hashes what its writer wrote; no caller supplies the digest. A status settable by assertion protects nothing (§8). |
-| Analysis and attestation are different claims | `DeidPolicy.guarantees_overlay_coverage` | Attesting needs a recall bound under the ceiling **and** a recorded measurement backing it. The default cannot attest while V-10 is open; a coarse grid cannot attest even with one. |
-| Platform is data, never a branch | `domain.RobotPlatform` | Vendor-specific behaviour belongs in ingestion adapters only. |
-| Gates cannot collapse to a scalar | `scoring.SafetyGateSet` | `float()`, `int()` and `bool()` raise. Hard gates never average into soft scores (§7.1). |
-| A gate that cannot see cannot clear | `GateStatus.NOT_ASSESSABLE` | Missing or low-confidence evidence never reads as a pass. |
-| ICC form is named, averaging refused | `metrics.icc_2_1` | An unqualified ICC is a family of numbers. Average-measures raises (§13). |
-| The agreement target is relative | `metrics.AgreementGate` | The panel is the ceiling; an absolute target either demands superhuman consistency or accepts noise. |
-| Binary proficiency is primary | `SkillScore` | GEARS alone is not a result (§13). |
-| The collapse is owned, not avoided | `decision.DecisionRule` | Credentialing ends in a binary act; if we don't collapse the vector every hospital invents its own (§7.2). |
-| Contestability ships with v1 | `decision.DecisionRecord` | Right of access, appeal, surfaced rater disagreement, right of response (§7.3). |
+## Execution boundary
 
-## Layout
+Package Python does not execute in the OR-Audit process by default. Local agents and task verifiers use a persistent JSON-lines subprocess protocol with request IDs, timeouts, malformed-output refusal, exit-status capture, and explicit process cleanup. `trusted-in-process` exists only as an explicit runtime kind for controlled test doubles. Runtime descriptors also represent pinned container, Hugging Face, and OpenAI-compatible identities; v0.3 locally executes the subprocess and trusted-test kinds.
 
-```
-src/or_audit/
-  eval/      Harbor-shaped tasks, datasets, trial vectors (BUILD.md P0)
-  domain/    entities, closed vocabularies, invariants (no I/O)
-  audit/     canonical serialization, tamper-evident append-only trail
-  media/     frame access behind a FrameSource protocol
-  ingest/    manifests into episodes; kinematics/video alignment
-  deid/      detectors, policy, redaction plans, attestation
-  perception/ observation vocabulary and backend protocol
-  scoring/   hard safety gates; binary proficiency and GEARS
-  metrics/   ICC(2,1), Fleiss kappa, the section 13 agreement gate
-  decision/  pre-registered decision rule, contestation, disclosure
-docs/BUILD.md       Harbor-for-medicine build plan (the wedge)
-docs/PLAN.md        credentialing-mode spec (gated; does not block B)
-docs/ASSESSMENT.md  straw-man / steel-man and pre-deployment test layers
-docs/examples/      seed fixtures: gym-policy + video-predict, org/name agents
-```
+The agent receives only task inputs or observations. Labels and other oracle evidence are passed separately to the task-owned verifier.
 
-## Development
+## Vector semantics
+
+Metrics declare their type and aggregation rule:
+
+- Boolean: true/false counts and assessed rate.
+- Continuous: unit, direction, mean, minimum, and maximum.
+- Categorical: declared categories and counts.
+- Unassessable: `null`, counted separately for every metric type.
+
+Hard gates remain separate. `TrialVector` raises on implicit `float`, `int`, or `bool` conversion.
+
+RL exports use a task-declared `ProjectionSpec`. A projection is data, not Python: source metric, guard metrics, gate-failure behavior, gate-unassessable behavior, output values, version, and rule digest. Export recomputes every value from the authoritative vector and writes the complete rule plus its digest beside each reward.
+
+## Run the packaged reference paths
 
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
@@ -92,47 +52,80 @@ Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 uv venv --python 3.13
 uv pip install -e ".[dev]"
 
-uv run pytest              # tests
-uv run ruff check .        # lint
-uv run ruff format .       # format
-uv run mypy                # types
-
-uv run or-audit tasks validate docs/examples/tasks/lumen-nav-safe
-uv run or-audit tasks validate docs/examples/tasks/video-nextstep
-uv run or-audit agents validate docs/examples/agents/seldingermed-lumen-linear
+# Closed-loop Lumen policy
 uv run or-audit bind docs/examples/tasks/lumen-nav-safe \
-                     docs/examples/agents/seldingermed-lumen-linear
-uv run or-audit datasets validate docs/examples/datasets/lumen-nav-v0
-uv run or-audit run -t docs/examples/tasks/video-nextstep \
-    -a docs/examples/agents/example-video-predictor --out /tmp/or-audit-video
-uv run or-audit run -t docs/examples/tasks/angiostress-dias \
-    -a docs/examples/agents/seldingermed-cath-seg --out /tmp/or-audit-angio
-uv run or-audit run -c docs/examples/jobs/lumen-nav-random -n 2 \
-    --out /tmp/or-audit-job
-uv run or-audit export-rl /tmp/or-audit-job --projection gated_reach_v0 \
-    --out /tmp/rollouts.jsonl
+  docs/examples/agents/seldingermed-lumen-linear
+uv run or-audit run -t docs/examples/tasks/lumen-nav-safe \
+  -a docs/examples/agents/seldingermed-lumen-linear -n 3 \
+  --out /tmp/or-audit-lumen
 
-# P4 public packages and static vector leaderboard
-uv run or-audit datasets list
-uv run or-audit agents list
-uv run or-audit run -d seldingermed/lumen-nav@0 \
-    -a seldingermed/lumen-linear@0 -n 30 --out /tmp/or-audit-lumen
-uv run or-audit replay /tmp/or-audit-lumen/lumen-nav-safe
-uv run or-audit leaderboard /tmp/or-audit-lumen /tmp/or-audit-video \
-    --out /tmp/or-audit-site
+# Procedural-video structured prediction with abstention
+uv run or-audit run -t docs/examples/tasks/video-nextstep \
+  -a docs/examples/agents/example-video-predictor \
+  --out /tmp/or-audit-video
+
+# Counterfactual world-model consequence ranking
+uv run or-audit bind docs/examples/tasks/counterfactual-recovery \
+  docs/examples/agents/example-counterfactual-world-model
+uv run or-audit run -t docs/examples/tasks/counterfactual-recovery \
+  -a docs/examples/agents/example-counterfactual-world-model \
+  --out /tmp/or-audit-counterfactual
+uv run or-audit replay /tmp/or-audit-counterfactual
+uv run or-audit export-rl /tmp/or-audit-counterfactual \
+  --projection gated-recovery-v1 \
+  --out /tmp/or-audit-counterfactual/rollouts.jsonl
 ```
 
-`run -c` is the cartesian product of agents × tasks in `job.toml`. `export-rl`
-writes a closed, versioned projection for training only; scorecards and leaderboards
-keep the vector. Job bundles contain the exact task and agent packages with content
-digests, so replay does not depend on the source checkout.
+Tasksets use the canonical v0.3 verb:
 
-Live Lumen uses the task's pinned commit and requires the `lumen` extra. The public
-AngioStress package runs its pinned full release audit and downloads roughly 7 GB of
-derived public artifacts on first use. Neither row is clinical-validation evidence.
+```bash
+uv run or-audit tasksets validate docs/examples/tasksets/counterfactual-recovery-v1
+uv run or-audit run -s docs/examples/tasksets/counterfactual-recovery-v1 \
+  -a docs/examples/agents/example-counterfactual-world-model \
+  --out /tmp/or-audit-taskset
+```
 
-CI runs lint, format check, mypy, and the test matrix on 3.11–3.13 with a
-coverage floor. All must pass before merge.
+`datasets` and `-d/--dataset` remain input aliases for v0.2 automation during migration.
+
+## Artifacts
+
+Each job contains:
+
+- `bundle/task` and `bundle/agent`: exact packages covered by tree digests.
+- `bundle.json`: package and runtime identity.
+- `config.json`: interface, harness mode, pins, and run count.
+- `result.json`: authoritative vectors, typed traces, projection digests, and artifact head.
+- `trial-*/trajectory.json`: typed procedural evidence.
+- `trial-*/projection.json`: derived projection value, identity, and rule digest.
+- `scorecard.json`, `.md`, `.html`: separate gate and typed-metric aggregation plus interface, mode, runtime, projection, package, and artifact identities.
+
+Replay reconstructs each vector from its stored trace through the bundled task verifier before rerunning the world or model. A mismatched vector, package digest, projection, or result head is refused.
+
+## v0.2 package migration
+
+The loader deterministically normalizes existing packages:
+
+| v0.2 | v0.3 |
+|---|---|
+| task `port` | `InterfaceSpec` + matching `HarnessSpec` |
+| agent `port` | `CapabilitySpec` |
+| `DatasetSpec` / `dataset.toml` | `TasksetSpec` / `taskset.toml` |
+| untyped verifier metric | inferred boolean or continuous `MetricSpec` |
+| entrypoint fields | local subprocess `RuntimeDescriptor` |
+| tuple-of-dicts trajectory | `ProceduralTrace` with preserved legacy evidence |
+
+The in-tree task and agent examples declare v0.3 contracts directly. External v0.2 packages continue to load and replay through the compatibility adapter.
+
+## Development
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy
+uv run pytest
+```
+
+Implementation plan and migration details: [`docs/V0.3.md`](docs/V0.3.md). Product architecture and invariants: [`docs/BUILD.md`](docs/BUILD.md). Evaluation rationale: [`docs/ASSESSMENT.md`](docs/ASSESSMENT.md).
 
 ## Licence
 

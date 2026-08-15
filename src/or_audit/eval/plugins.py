@@ -1,43 +1,53 @@
-"""Load task and agent entrypoints from versioned package directories."""
+"""Execute task and agent plugins through a line-delimited JSON subprocess protocol."""
 
 from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
+import selectors
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Protocol, cast, runtime_checkable
 
 from or_audit.errors import TaskContractError
+from or_audit.eval.contracts import RuntimeDescriptor, RuntimeKind
 from or_audit.eval.integrity import package_file
+
+
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, str | int | float | bool) or value is None:
+        return value
+    to_list = getattr(value, "tolist", None)
+    if callable(to_list):
+        return _jsonable(to_list())
+    item = getattr(value, "item", None)
+    if callable(item):
+        return _jsonable(item())
+    raise TaskContractError(f"plugin request contains non-JSON value {type(value).__name__}")
 
 
 @runtime_checkable
 class PolicyRuntime(Protocol):
-    """A loaded gym policy."""
-
-    def reset(self, *, seed: int) -> None:
-        """Reset episode-local state."""
-
-    def act(self, observation: Any, *, step: int) -> Any:
-        """Return one action for the current observation."""
+    def reset(self, *, seed: int) -> None: ...
+    def act(self, observation: Any, *, step: int) -> Any: ...
 
 
 @runtime_checkable
 class PredictorRuntime(Protocol):
-    """A loaded video/contract predictor."""
-
-    def predict(self, item: dict[str, Any]) -> dict[str, Any]:
-        """Return one structured prediction without receiving its label."""
+    def predict(self, item: dict[str, Any]) -> dict[str, Any]: ...
 
 
 @runtime_checkable
 class VerifierRuntime(Protocol):
-    """A task-owned vector verifier."""
-
-    def score(self, context: dict[str, Any]) -> dict[str, Any]:
-        """Return declared gate outcomes and metric values."""
+    def score(self, context: dict[str, Any]) -> dict[str, Any]: ...
 
 
 def _module(path: Path) -> ModuleType:
@@ -54,11 +64,12 @@ def _module(path: Path) -> ModuleType:
 
 
 def load_entrypoint(root: Path, entrypoint: str, *, label: str) -> Callable[..., Any]:
-    """Load ``relative.py:symbol`` from ``root`` without changing ``sys.path``."""
+    """Load an entrypoint inside an already isolated plugin-host process."""
     module_path, separator, symbol = entrypoint.partition(":")
     if not separator or not module_path or not symbol:
-        msg = f"{label} entrypoint must be relative.py:symbol, got {entrypoint!r}"
-        raise TaskContractError(msg)
+        raise TaskContractError(
+            f"{label} entrypoint must be relative.py:symbol, got {entrypoint!r}"
+        )
     path = package_file(root, module_path, label=f"{label} module")
     target = getattr(_module(path), symbol, None)
     if not callable(target):
@@ -66,25 +77,215 @@ def load_entrypoint(root: Path, entrypoint: str, *, label: str) -> Callable[...,
     return cast(Callable[..., Any], target)
 
 
-def load_policy_runtime(root: Path, entrypoint: str, weights_path: str) -> PolicyRuntime:
-    factory = load_entrypoint(root, entrypoint, label="policy")
-    runtime = factory(root=root, weights_path=package_file(root, weights_path, label="weights"))
-    if not isinstance(runtime, PolicyRuntime):
-        raise TaskContractError("policy factory must return an object with reset(seed=) and act()")
-    return runtime
+class JsonSubprocessRuntime:
+    """Persistent JSON-lines child with bounded request latency."""
+
+    def __init__(self, command: tuple[str, ...], *, cwd: Path, timeout_sec: float) -> None:
+        self._timeout_sec = timeout_sec
+        self._next_request = 0
+        self._process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+
+    def request(self, op: str, payload: dict[str, Any]) -> Any:
+        process = self._process
+        if process.stdin is None or process.stdout is None:
+            raise TaskContractError("plugin process has no JSON protocol streams")
+        request_id = self._next_request
+        self._next_request += 1
+        message = json.dumps(
+            {"request_id": request_id, "op": op, "payload": _jsonable(payload)},
+            separators=(",", ":"),
+        )
+        try:
+            process.stdin.write(message + "\n")
+            process.stdin.flush()
+        except BrokenPipeError as exc:
+            raise TaskContractError(self._failure("plugin process exited before request")) from exc
+
+        selector = selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ)
+        ready = selector.select(self._timeout_sec)
+        selector.close()
+        if not ready:
+            process.kill()
+            process.wait()
+            self._close_pipes()
+            raise TaskContractError(f"plugin request {op!r} exceeded {self._timeout_sec}s")
+        line = process.stdout.readline()
+        if not line:
+            raise TaskContractError(self._failure("plugin process returned no response"))
+        try:
+            response = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise TaskContractError(f"plugin returned malformed JSON: {line[:200]!r}") from exc
+        if response.get("request_id") != request_id:
+            raise TaskContractError("plugin response request_id does not match request")
+        if not response.get("ok"):
+            error = response.get("error", "unknown plugin failure")
+            raise TaskContractError(f"plugin {op} failed: {error}")
+        return response.get("result")
+
+    def _failure(self, message: str) -> str:
+        stderr = ""
+        if self._process.stderr is not None and self._process.poll() is not None:
+            stderr = self._process.stderr.read().strip()
+        return f"{message}: {stderr}" if stderr else message
+
+    def _close_pipes(self) -> None:
+        for stream in (self._process.stdin, self._process.stdout, self._process.stderr):
+            if stream is not None and not stream.closed:
+                stream.close()
+
+    def close(self) -> None:
+        if self._process.poll() is not None:
+            self._close_pipes()
+            return
+        try:
+            self.request("close", {})
+        except TaskContractError:
+            self._process.kill()
+        finally:
+            try:
+                self._process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+                self._process.wait()
+            self._close_pipes()
 
 
-def load_predictor_runtime(root: Path, entrypoint: str, weights_path: str) -> PredictorRuntime:
-    factory = load_entrypoint(root, entrypoint, label="predictor")
-    runtime = factory(root=root, weights_path=package_file(root, weights_path, label="weights"))
-    if not isinstance(runtime, PredictorRuntime):
-        raise TaskContractError("predictor factory must return an object with predict(item)")
-    return runtime
+class SubprocessPolicyRuntime(JsonSubprocessRuntime):
+    def reset(self, *, seed: int) -> None:
+        self.request("reset", {"seed": seed})
+
+    def act(self, observation: Any, *, step: int) -> Any:
+        return self.request("act", {"observation": observation, "step": step})
 
 
-def load_verifier_runtime(root: Path, entrypoint: str) -> VerifierRuntime:
-    factory = load_entrypoint(root, entrypoint, label="verifier")
-    runtime = factory(root=root)
-    if not isinstance(runtime, VerifierRuntime):
-        raise TaskContractError("verifier factory must return an object with score(context)")
-    return runtime
+class SubprocessPredictorRuntime(JsonSubprocessRuntime):
+    def predict(self, item: dict[str, Any]) -> dict[str, Any]:
+        result = self.request("predict", {"item": item})
+        if not isinstance(result, dict):
+            raise TaskContractError("predictor subprocess must return an object")
+        return result
+
+
+class SubprocessVerifierRuntime(JsonSubprocessRuntime):
+    def score(self, context: dict[str, Any]) -> dict[str, Any]:
+        result = self.request("score", {"context": context})
+        if not isinstance(result, dict):
+            raise TaskContractError("verifier subprocess must return an object")
+        return result
+
+
+def _host_command(
+    *, role: str, root: Path, entrypoint: str, weights_path: str = ""
+) -> tuple[str, ...]:
+    command = [
+        sys.executable,
+        "-m",
+        "or_audit.eval.plugin_host",
+        "--role",
+        role,
+        "--root",
+        str(root.resolve()),
+        "--entrypoint",
+        entrypoint,
+    ]
+    if weights_path:
+        command.extend(["--weights-path", weights_path])
+    return tuple(command)
+
+
+def _runtime_command(
+    descriptor: RuntimeDescriptor | None,
+    *,
+    role: str,
+    root: Path,
+    entrypoint: str,
+    weights_path: str = "",
+) -> tuple[tuple[str, ...], float]:
+    runtime = descriptor or RuntimeDescriptor(kind=RuntimeKind.LOCAL, entrypoint=entrypoint)
+    if runtime.kind is not RuntimeKind.LOCAL:
+        raise TaskContractError(
+            f"runtime {runtime.kind.value} is represented but is not locally executable"
+        )
+    if runtime.command:
+        replacements = {
+            "{package}": str(root.resolve()),
+            "{entrypoint}": entrypoint,
+            "{weights}": weights_path,
+            "{role}": role,
+        }
+        command = tuple(replacements.get(part, part) for part in runtime.command)
+    else:
+        command = _host_command(
+            role=role,
+            root=root,
+            entrypoint=runtime.entrypoint or entrypoint,
+            weights_path=weights_path,
+        )
+    return command, runtime.timeout_sec
+
+
+def load_policy_runtime(
+    root: Path,
+    entrypoint: str,
+    weights_path: str,
+    runtime: RuntimeDescriptor | None = None,
+) -> PolicyRuntime:
+    if runtime is not None and runtime.kind is RuntimeKind.TRUSTED_IN_PROCESS:
+        factory = load_entrypoint(root, runtime.entrypoint or entrypoint, label="trusted policy")
+        loaded = factory(
+            root=root,
+            weights_path=package_file(root, weights_path, label="weights"),
+        )
+        if not isinstance(loaded, PolicyRuntime):
+            raise TaskContractError("trusted policy factory returned an incompatible object")
+        return loaded
+    command, timeout = _runtime_command(
+        runtime, role="policy", root=root, entrypoint=entrypoint, weights_path=weights_path
+    )
+    return SubprocessPolicyRuntime(command, cwd=root.resolve(), timeout_sec=timeout)
+
+
+def load_predictor_runtime(
+    root: Path,
+    entrypoint: str,
+    weights_path: str,
+    runtime: RuntimeDescriptor | None = None,
+) -> PredictorRuntime:
+    if runtime is not None and runtime.kind is RuntimeKind.TRUSTED_IN_PROCESS:
+        factory = load_entrypoint(root, runtime.entrypoint or entrypoint, label="trusted predictor")
+        loaded = factory(
+            root=root,
+            weights_path=package_file(root, weights_path, label="weights"),
+        )
+        if not isinstance(loaded, PredictorRuntime):
+            raise TaskContractError("trusted predictor factory returned an incompatible object")
+        return loaded
+    command, timeout = _runtime_command(
+        runtime, role="predictor", root=root, entrypoint=entrypoint, weights_path=weights_path
+    )
+    return SubprocessPredictorRuntime(command, cwd=root.resolve(), timeout_sec=timeout)
+
+
+def load_verifier_runtime(
+    root: Path,
+    entrypoint: str,
+    runtime: RuntimeDescriptor | None = None,
+) -> VerifierRuntime:
+    if runtime is not None and runtime.kind is RuntimeKind.TRUSTED_IN_PROCESS:
+        factory = load_entrypoint(root, runtime.entrypoint or entrypoint, label="trusted verifier")
+        loaded = factory(root=root)
+        if not isinstance(loaded, VerifierRuntime):
+            raise TaskContractError("trusted verifier factory returned an incompatible object")
+        return loaded
+    command, timeout = _runtime_command(runtime, role="verifier", root=root, entrypoint=entrypoint)
+    return SubprocessVerifierRuntime(command, cwd=root.resolve(), timeout_sec=timeout)

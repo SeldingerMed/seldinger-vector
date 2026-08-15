@@ -1,4 +1,4 @@
-format_version = "1"
+format_version = "2"
 id = "angiostress-dias"
 task_version = "1"
 
@@ -22,10 +22,17 @@ inputs_path = "inputs.json"
 labels_path = "labels.json"
 contract_path = "contract.json"
 
-[port]
+[interface]
 id = "video-predict"
-observation = "dsa-sequence"
-prediction = "release-audit"
+interaction_mode = "single-turn"
+protocol_version = "1"
+observations = ["dsa-sequence"]
+outputs = ["release-audit"]
+
+[harness]
+interaction_mode = "single-turn"
+protocol_version = "1"
+max_steps = 1
 
 [agent]
 kinds = ["frozen-model"]
@@ -44,21 +51,38 @@ id = "finite_metric_check"
 
 [[verifier.metrics]]
 id = "release_audit_passed"
+kind = "boolean"
+direction = "maximize"
 
 [[verifier.metrics]]
 id = "dias_prediction_count"
+kind = "continuous"
+unit = "count"
+direction = "neutral"
 
 [[verifier.metrics]]
 id = "cathaction_prediction_count"
+kind = "continuous"
+unit = "count"
+direction = "neutral"
 
 [[verifier.metrics]]
 id = "sam_vit_b_mean_dice"
+kind = "continuous"
+unit = "fraction"
+direction = "maximize"
 
 [[verifier.metrics]]
 id = "sam_vit_l_mean_dice"
+kind = "continuous"
+unit = "fraction"
+direction = "maximize"
 
 [[verifier.metrics]]
 id = "medsam_vit_b_mean_dice"
+kind = "continuous"
+unit = "fraction"
+direction = "maximize"
 
 [attestation]
 level = "none"

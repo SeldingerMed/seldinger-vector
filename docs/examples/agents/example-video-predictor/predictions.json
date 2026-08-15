@@ -4,17 +4,20 @@
       "id": "clip-001",
       "next_step": "advance",
       "outcome": "continue",
+      "reasoning": "The active path remains patent and forward progression is supported.",
       "unsafe": false
     },
     {
       "id": "clip-002",
       "next_step": "withdraw",
       "outcome": "abort",
+      "reasoning": "The unsafe marker indicates that continued advance should stop.",
       "unsafe": true
     },
     {
       "id": "clip-003",
-      "abstain": true
+      "abstain": true,
+      "reasoning": "The clip does not contain enough evidence for a supported next-step claim."
     }
   ]
 }

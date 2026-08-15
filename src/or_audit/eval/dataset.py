@@ -1,13 +1,8 @@
-"""A dataset is a versioned collection of tasks.
-
-Harbor: a dataset is a collection of tasks, sometimes with custom metrics.
-Here the custom metric cannot be 'mean reward', and the headline cannot be
-raw reach when safe success exists on any task.
-"""
+"""Versioned tasksets with v0.2 dataset compatibility."""
 
 from __future__ import annotations
 
-from typing import Annotated, Self
+from typing import Annotated, Any, Self
 
 from pydantic import BaseModel, ConfigDict, StringConstraints, model_validator
 
@@ -18,7 +13,7 @@ from or_audit.eval.task import TaskSpec
 Slug = Annotated[
     str, StringConstraints(min_length=1, max_length=80, pattern=r"^[a-z0-9][a-z0-9_-]*$")
 ]
-DatasetId = Annotated[
+TasksetId = Annotated[
     str,
     StringConstraints(
         min_length=3,
@@ -28,52 +23,62 @@ DatasetId = Annotated[
 ]
 
 
-class DatasetSpec(BaseModel):
-    """Loaded dataset. ``tasks`` are already validated TaskSpecs."""
+class TasksetSpec(BaseModel):
+    """Canonical collection of validated tasks."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     format_version: Annotated[str, StringConstraints(min_length=1, max_length=16)]
-    id: DatasetId
-    dataset_version: Annotated[str, StringConstraints(min_length=1, max_length=32)]
+    id: TasksetId
+    taskset_version: Annotated[str, StringConstraints(min_length=1, max_length=32)]
     headline: Slug
     phi_class: PhiClass
     tasks: tuple[TaskSpec, ...]
     description: str = ""
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_dataset_name(cls, raw: Any) -> Any:
+        if not isinstance(raw, dict):
+            return raw
+        data = dict(raw)
+        if "taskset_version" not in data and "dataset_version" in data:
+            data["taskset_version"] = data.pop("dataset_version")
+        return data
+
     @model_validator(mode="after")
     def _non_empty(self) -> Self:
         if not self.tasks:
-            msg = f"dataset {self.id} contains no tasks"
-            raise TaskContractError(msg)
-        ids = [t.id for t in self.tasks]
+            raise TaskContractError(f"taskset {self.id} contains no tasks")
+        ids = [task.id for task in self.tasks]
         if len(set(ids)) != len(ids):
-            msg = f"dataset {self.id} lists the same task id twice"
-            raise TaskContractError(msg)
+            raise TaskContractError(f"taskset {self.id} lists the same task id twice")
         return self
 
-    def check_tasks(self) -> None:
-        """Cross-check tasks against the dataset headline and PHI class.
+    @property
+    def dataset_version(self) -> str:
+        """v0.2 compatibility spelling."""
+        return self.taskset_version
 
-        Called by the loader after construction so TaskSpecs are in hand.
-        """
+    def check_tasks(self) -> None:
         for task in self.tasks:
             if task.verifier.headline != self.headline:
-                msg = (
-                    f"dataset {self.id} headlines {self.headline!r} but task "
+                raise TaskContractError(
+                    f"taskset {self.id} headlines {self.headline!r} but task "
                     f"{task.id} headlines {task.verifier.headline!r}"
                 )
-                raise TaskContractError(msg)
             if task.phi.class_ is not self.phi_class:
-                msg = (
-                    f"dataset {self.id} is phi={self.phi_class.value} but task "
+                raise TaskContractError(
+                    f"taskset {self.id} is phi={self.phi_class.value} but task "
                     f"{task.id} is phi={task.phi.class_.value}"
                 )
-                raise TaskContractError(msg)
-            metric_ids = {m.id for m in task.verifier.metrics}
+            metric_ids = {metric.id for metric in task.verifier.metrics}
             if self.headline == "raw_success" and "safe_success" in metric_ids:
-                msg = (
-                    f"dataset {self.id} headlines raw_success while task "
-                    f"{task.id} measures safe_success; BUILD.md forbids that collapse"
+                raise TaskContractError(
+                    f"taskset {self.id} cannot headline raw_success while "
+                    f"task {task.id} measures safe_success"
                 )
-                raise TaskContractError(msg)
+
+
+DatasetSpec = TasksetSpec
+DatasetId = TasksetId

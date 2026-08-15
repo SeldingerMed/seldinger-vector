@@ -12,9 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from or_audit.audit.canonical import digest
 from or_audit.errors import TaskContractError
 from or_audit.eval.agent import AgentPackage
+from or_audit.eval.contracts import MetricKind
 from or_audit.eval.enums import WorldKind
 from or_audit.eval.integrity import tree_digest
 from or_audit.eval.task import TaskSpec
+from or_audit.eval.trace import ProceduralTrace
 from or_audit.eval.vector import TrialVector
 
 
@@ -25,8 +27,9 @@ class TrialRecord(BaseModel):
 
     seed: Annotated[int, Field(ge=0)]
     vector: TrialVector
-    trajectory: tuple[dict[str, Any], ...] = ()
+    trajectory: ProceduralTrace = Field(default_factory=lambda: ProceduralTrace(()))
     projection: float | None = None
+    projection_spec_digest: str = ""
 
 
 class JobResult(BaseModel):
@@ -34,10 +37,15 @@ class JobResult(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    format_version: str = "2"
     task_id: str
     task_version: str
     agent_identity: str
     world_pin: str
+    interface_id: str = ""
+    interaction_mode: str = ""
+    runtime_identity: str = ""
+    projection_identity: str = ""
     task_digest: str
     agent_digest: str
     n: Annotated[int, Field(ge=1)]
@@ -114,6 +122,7 @@ def assemble_job_result(
 ) -> JobResult:
     """Build a publishable job result and stamp its head."""
     assert_publishable(task, trials, claim_footer)
+    headline_definition = task.metric(task.verifier.headline)
     headline_true = 0
     headline_false = 0
     headline_unassessable = 0
@@ -122,10 +131,11 @@ def assemble_job_result(
         value = trial.vector.headline.value
         if value is None:
             headline_unassessable += 1
-        elif value is True or (isinstance(value, int | float) and value != 0):
-            headline_true += 1
-        else:
-            headline_false += 1
+        elif headline_definition.kind is MetricKind.BOOLEAN:
+            if value is True:
+                headline_true += 1
+            else:
+                headline_false += 1
         if trial.vector.any_gate_failed:
             gate_failed += 1
     result = JobResult(
@@ -133,6 +143,10 @@ def assemble_job_result(
         task_version=task.task_version,
         agent_identity=agent_identity(agent),
         world_pin=task.environment.world_pin,
+        interface_id=task.interface.id,
+        interaction_mode=task.harness.interaction_mode.value,
+        runtime_identity=agent.runtime_identity,
+        projection_identity=task.projection.identity if task.projection else "",
         task_digest=task_digest,
         agent_digest=agent_digest,
         n=len(trials),
@@ -202,13 +216,14 @@ def write_job(
         if tree_digest(agent_target) != result.agent_digest:
             raise TaskContractError("copied agent package digest does not match result")
     manifest = {
-        "format_version": "1",
+        "format_version": "2",
         "task": {"path": "bundle/task", "digest": result.task_digest},
         "agent": (
             {"path": "bundle/agent", "digest": result.agent_digest}
             if agent_dir is not None
             else {"path": None, "digest": result.agent_digest}
         ),
+        "runtime_identity": result.runtime_identity,
     }
     (out / "bundle.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     (out / "config.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
@@ -226,7 +241,15 @@ def write_job(
         )
         if trial.projection is not None:
             (trial_dir / "projection.json").write_text(
-                json.dumps({"projection": trial.projection}) + "\n", encoding="utf-8"
+                json.dumps(
+                    {
+                        "projection": trial.projection,
+                        "projection_identity": result.projection_identity,
+                        "projection_spec_digest": trial.projection_spec_digest,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
             )
     from or_audit.eval.scorecard import write_scorecards
 

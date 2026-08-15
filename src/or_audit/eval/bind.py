@@ -1,10 +1,4 @@
-"""Bind an ``org/name`` agent to a task, or refuse.
-
-The sandbox services ``seldingermed/lumen-linear`` and ``acme/cabg-vlm`` with
-the same verb. Compatibility is port (and accepted agent kind), not
-procedure name. We do not heuristically "adapt" a video model onto a gym
-task.
-"""
+"""Bind task interface requirements to declared agent capabilities."""
 
 from __future__ import annotations
 
@@ -14,20 +8,21 @@ from or_audit.eval.task import TaskSpec
 
 
 def assert_bind(task: TaskSpec, agent: AgentPackage) -> None:
-    """Raise unless this agent can be scored on this task.
-
-    Raises:
-        TaskContractError: Port mismatch or agent kind the task does not accept.
-    """
-    if task.port.id is not agent.port:
-        msg = (
-            f"agent {agent.id} implements {agent.port.value} but task "
-            f"{task.id} requires {task.port.id.value}; a video-predict model "
-            f"is not silently a gym policy, and the kernel does not invent a "
-            f"procedure-specific adapter to paper over that (BUILD.md §1.1a)"
+    """Raise unless one capability satisfies the complete task interface."""
+    capability = next(
+        (candidate for candidate in agent.capabilities if candidate.satisfies(task.interface)),
+        None,
+    )
+    if capability is None:
+        declared = ", ".join(item.interface for item in agent.capabilities)
+        raise TaskContractError(
+            f"agent {agent.id} capabilities [{declared}] do not satisfy "
+            f"task {task.id} interface {task.interface.id} "
+            f"({task.interface.interaction_mode.value}); legacy ports such as "
+            "video-predict and gym-policy are normalized before this check"
         )
-        raise TaskContractError(msg)
     if agent.kind not in task.agent.kinds:
-        accepted = ", ".join(k.value for k in task.agent.kinds)
-        msg = f"agent {agent.id} is kind={agent.kind.value} but task {task.id} accepts {accepted}"
-        raise TaskContractError(msg)
+        accepted = ", ".join(task.agent.kinds)
+        raise TaskContractError(
+            f"agent {agent.id} is kind={agent.kind} but task {task.id} accepts {accepted}"
+        )
