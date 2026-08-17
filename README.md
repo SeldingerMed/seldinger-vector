@@ -1,8 +1,10 @@
-# OR-Audit
+# Vector
 
 Independent evaluation infrastructure for procedural medical AI.
 
-OR-Audit binds versioned task interfaces to declared agent capabilities, executes agents and task-owned verifiers in separate processes, and writes replayable vector evidence. The v0.3 kernel supports closed-loop policies, multi-turn interactive agents, structured single-turn models, and counterfactual world models without adding procedure-specific runner branches.
+Vector binds versioned task interfaces to declared agent capabilities, executes agents and task-owned verifiers in separate processes, and writes replayable vector evidence. The v0.3 kernel supports closed-loop policies, multi-turn interactive agents, structured single-turn models, and counterfactual world models without adding procedure-specific runner branches.
+
+Install the CLI as `vector`. The `or-audit` entry point remains as a one-release alias.
 
 ## Core model
 
@@ -27,7 +29,7 @@ Every mode emits the same typed trace vocabulary: observations, outputs, actions
 
 ## Execution boundary
 
-Package Python does not execute in the OR-Audit process by default. Local agents and task verifiers use a persistent JSON-lines subprocess protocol with request IDs, timeouts, malformed-output refusal, exit-status capture, and explicit process cleanup. `trusted-in-process` exists only as an explicit runtime kind for controlled test doubles. Runtime descriptors also represent pinned container, Hugging Face, and OpenAI-compatible identities; v0.3 locally executes the subprocess and trusted-test kinds.
+Package Python does not execute in the Vector process by default. Local agents and task verifiers use a persistent JSON-lines subprocess protocol with request IDs, timeouts, malformed-output refusal, exit-status capture, and explicit process cleanup. `trusted-in-process` exists only as an explicit runtime kind for controlled test doubles. Runtime descriptors also represent pinned container, Hugging Face, and OpenAI-compatible identities; v0.3 locally executes the subprocess and trusted-test kinds.
 
 The agent receives only task inputs or observations. Labels and other oracle evidence are passed separately to the task-owned verifier.
 
@@ -53,36 +55,36 @@ uv venv --python 3.13
 uv pip install -e ".[dev]"
 
 # Closed-loop Lumen policy
-uv run or-audit bind docs/examples/tasks/lumen-nav-safe \
+uv run vector bind docs/examples/tasks/lumen-nav-safe \
   docs/examples/agents/seldingermed-lumen-linear
-uv run or-audit run -t docs/examples/tasks/lumen-nav-safe \
+uv run vector run -t docs/examples/tasks/lumen-nav-safe \
   -a docs/examples/agents/seldingermed-lumen-linear -n 3 \
-  --out /tmp/or-audit-lumen
+  --out /tmp/vector-lumen
 
 # Procedural-video structured prediction with abstention
-uv run or-audit run -t docs/examples/tasks/video-nextstep \
+uv run vector run -t docs/examples/tasks/video-nextstep \
   -a docs/examples/agents/example-video-predictor \
-  --out /tmp/or-audit-video
+  --out /tmp/vector-video
 
 # Counterfactual world-model consequence ranking
-uv run or-audit bind docs/examples/tasks/counterfactual-recovery \
+uv run vector bind docs/examples/tasks/counterfactual-recovery \
   docs/examples/agents/example-counterfactual-world-model
-uv run or-audit run -t docs/examples/tasks/counterfactual-recovery \
+uv run vector run -t docs/examples/tasks/counterfactual-recovery \
   -a docs/examples/agents/example-counterfactual-world-model \
-  --out /tmp/or-audit-counterfactual
-uv run or-audit replay /tmp/or-audit-counterfactual
-uv run or-audit export-rl /tmp/or-audit-counterfactual \
+  --out /tmp/vector-counterfactual
+uv run vector replay /tmp/vector-counterfactual
+uv run vector export-rl /tmp/vector-counterfactual \
   --projection gated-recovery-v1 \
-  --out /tmp/or-audit-counterfactual/rollouts.jsonl
+  --out /tmp/vector-counterfactual/rollouts.jsonl
 ```
 
 Tasksets use the canonical v0.3 verb:
 
 ```bash
-uv run or-audit tasksets validate docs/examples/tasksets/counterfactual-recovery-v1
-uv run or-audit run -s docs/examples/tasksets/counterfactual-recovery-v1 \
+uv run vector tasksets validate docs/examples/tasksets/counterfactual-recovery-v1
+uv run vector run -s docs/examples/tasksets/counterfactual-recovery-v1 \
   -a docs/examples/agents/example-counterfactual-world-model \
-  --out /tmp/or-audit-taskset
+  --out /tmp/vector-taskset
 ```
 
 `datasets` and `-d/--dataset` remain input aliases for v0.2 automation during migration.
