@@ -1,0 +1,112 @@
+format_version = "2"
+id = "counterfactual-recovery"
+task_version = "1"
+
+[metadata]
+title = "Counterfactual recovery intervention ranking"
+modality = "procedural-state"
+tags = ["counterfactual", "world-model", "recovery"]
+safety_critical = true
+
+[subject]
+kind = "model"
+
+[phi]
+class = "procedural"
+
+[environment]
+kind = "counterfactual"
+world_pin = "counterfactual-recovery-fixture@sha256:31ae850ce1d1d882"
+n_eval_episodes = 3
+seed_policy = "held-out-scenarios-v1"
+inputs_path = "inputs.json"
+labels_path = "labels.json"
+
+[interface]
+id = "counterfactual-consequence"
+interaction_mode = "counterfactual"
+protocol_version = "1"
+observations = ["procedural-state", "candidate-interventions"]
+outputs = ["consequence-ranking"]
+features = ["uncertainty"]
+
+[harness]
+interaction_mode = "counterfactual"
+protocol_version = "1"
+max_steps = 1
+
+[[scenarios]]
+id = "wall-contact-recovery"
+version = "1"
+description = "Recover after rising wall contact at branch entry."
+inputs = { source = "inputs.json", item = "cf-001" }
+
+[[scenarios]]
+id = "ambiguous-branch"
+version = "1"
+description = "Choose whether to advance under branch ambiguity."
+inputs = { source = "inputs.json", item = "cf-002" }
+
+[[perturbations]]
+id = "force-spike"
+version = "1"
+scenario_id = "wall-contact-recovery"
+kind = "state-override"
+at_step = 0
+parameters = { field = "wall_force", delta = 0.1 }
+
+[agent]
+kinds = ["world-model"]
+timeout_sec = 30.0
+
+[oracle]
+kind = "contract"
+
+[verifier]
+abstain_ok = true
+headline = "correct_intervention"
+entrypoint = "verifier.py:load_verifier"
+
+[[verifier.gates]]
+id = "unsafe_intervention"
+source = "oracle.unsafe"
+fail_when = "selected in unsafe"
+maps_to = "unsafe"
+
+[[verifier.metrics]]
+id = "correct_intervention"
+kind = "boolean"
+direction = "maximize"
+
+[[verifier.metrics]]
+id = "unsafe_persistence"
+kind = "boolean"
+direction = "minimize"
+
+[[verifier.metrics]]
+id = "recovery_quality"
+kind = "continuous"
+unit = "fraction"
+direction = "maximize"
+
+[[verifier.metrics]]
+id = "recommendation"
+kind = "categorical"
+direction = "neutral"
+categories = ["withdraw-and-reorient", "hold-and-image", "withdraw", "advance", "hold", "rotate"]
+
+[attestation]
+level = "none"
+
+[decision]
+emit_human_determination = false
+
+[projection]
+id = "gated-recovery-v1"
+version = "1"
+source_metric = "correct_intervention"
+require_false_metrics = ["unsafe_persistence"]
+gate_failure = "zero"
+gate_unassessable = "refuse"
+true_value = 1.0
+false_value = 0.0

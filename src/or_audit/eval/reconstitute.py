@@ -52,13 +52,24 @@ def reconstitute_trial_vector(
             "trajectory": raw,
             "safety_max_pen": safety_max_pen,
         }
-    elif first.get("kind") == "video-predict":
+    elif first.get("kind") == "interactive":
+        last = raw[-1]
+        if not isinstance(last, dict) or not all(
+            key in last for key in ("input", "label", "prediction", "history")
+        ):
+            msg = f"{trial_dir.name} interactive trajectory has no terminal scoring context"
+            raise TaskContractError(msg)
+        context = last
+    elif first.get("kind") in {"video-predict", "counterfactual"}:
         if len(raw) != 1:
-            msg = f"{trial_dir.name} video-predict trajectory must have exactly one item"
+            msg = f"{trial_dir.name} {first.get('kind')} trajectory must have exactly one item"
             raise TaskContractError(msg)
         context = first
     else:
-        msg = f"{trial_dir.name} trajectory is neither gym-policy (action+info) nor video-predict"
+        msg = (
+            f"{trial_dir.name} trajectory is not gym-policy, interactive, "
+            "video-predict, or counterfactual"
+        )
         raise TaskContractError(msg)
     return score_context(
         task=task,

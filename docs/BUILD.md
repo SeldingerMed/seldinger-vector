@@ -1,19 +1,18 @@
 # BUILD: Harbor for procedural medical AI
 
-**Status:** definitive build plan for Future B (decided).
-**Analog:** [Harbor](https://www.harborframework.com/) — evaluate agents in sandboxed environments — specialized for medical world models and technical procedural AI.
-**Not:** `PLAN.md` credentialing (Future C). That remains a gated mode on these rails. Do not let hospital ACV block this plan.
+**Status:** v0.3 framework implemented; [`V0.3.md`](V0.3.md) is the migration record.
+**Analog:** [Harbor](https://www.harborframework.com/) — evaluate agents in isolated environments — specialized for medical world models and technical procedural AI.
 **Companions:** [Lumen](https://github.com/SeldingerMed/seldinger-lumen), [AngioStress](https://github.com/SeldingerMed/angiostress-benchmark), [`ASSESSMENT.md`](ASSESSMENT.md).
 
-Harbor’s homepage is one sentence: *evaluate agents in sandboxed environments.* Ours is the same sentence with the sandbox replaced:
+> Evaluate medical procedural agents — policies, frozen perception models, VLMs, and world models — against pinned task interfaces, and score them with a vector verifier that cannot hide a hard-gate failure inside a reach metric.
 
-> Evaluate medical procedural agents — policies, frozen perception models, VLMs, world models — in physics and image environments, and score them with a vector verifier that cannot hide injury inside a reach metric.
+The evals remain open-ended. Task authors publish procedure-specific worlds, schemas, scenarios, perturbations, labels, and verifiers. The kernel defines reusable interaction modes and schema-level interfaces instead of procedure names or a permanent list of ports.
 
-**The evals are infinite. We do not enumerate them.** Harbor does not have a kernel enum for Python vs Rust vs Go. It runs whatever Dockerfile + tests a task author submitted. Same here: we cannot heuristically define CABG next-step, a cath policy, and everything in between. We define a **port** (how the model talks), a **task format** (what the author must bring), and a runner that services `acme/cabg-vlm` the same way it services `seldingermed/lumen-linear`.
+v0.3 replaces direct port equality with `InterfaceSpec` requirements satisfied by agent `CapabilitySpec` declarations. The harness dispatches four modes: `closed-loop`, `interactive`, `single-turn`, and `counterfactual`. Agent and verifier package code runs through separate JSON subprocesses by default. All modes write `ProceduralTrace`, typed metric vectors, task-declared projection identities, and replayable package bundles.
 
-Lumen is the first *seed world* so the sandbox is runnable. It is not the catalog of medicine.
+Lumen is the first seed world, procedural video is the first structured-prediction surface, and `counterfactual-recovery` is the runnable world-model path. They exercise one kernel rather than defining its taxonomy.
 
-This document is the product spec and the build order. `or_audit.eval` is the kernel that makes the spec load-bearing.
+This document records the product architecture. The original P0–P4 build sequence below remains useful history; v0.3 contract names are authoritative where older `port` or `dataset` terminology appears.
 
 ---
 
@@ -23,13 +22,13 @@ This document is the product spec and the build order. `or_audit.eval` is the ke
 
 Niche infrastructure, not a model and not a hospital app.
 
-1. **A task format** for procedural evals (instruction + world + vector verifier).
-2. **A runner** that turns `(task, agent, seed)` into a replayable trial.
-3. **Datasets** that are versioned collections of tasks (the analog of Terminal-Bench / SWE-Bench).
-4. **An RL interface** that exports trajectories and a *versioned scalar projection* of the vector — never the other way around.
-5. **A registry / leaderboard** whose headline is always the safety-aware metric.
+1. **A task format** for procedural evals: instruction, pinned world, interface, harness, scenarios, perturbations, and vector verifier.
+2. **A runner** that turns `(task, agent, seed)` into a replayable typed trial while keeping agent inputs separate from oracle evidence.
+3. **Tasksets**: versioned collections of tasks, compatible with v0.2 dataset packages.
+4. **An RL interface** that exports trajectories and a task-declared, versioned scalar projection of the vector.
+5. **A registry / leaderboard** whose rows retain gates and typed metrics.
 
-Buyers: anyone training or claiming a technical AI system that *acts in* or *decides from* a procedure. They already need third-party numbers they cannot credibly self-issue. The unit they hand us is `(dataset, agent)`, both `org/name@version` — not a procedure we had to have thought of first.
+Buyers hand OR-Audit `(taskset, agent)` identities as `org/name@version`; binding is decided by interface capability, not by a procedure list.
 
 ### 1.1a The sandbox is ports + submissions, not a procedure list (normative)
 
@@ -39,34 +38,36 @@ We cannot put an OR in a Dockerfile, and we cannot write a heuristic for every p
 
 | Finite (kernel) | Infinite (registry) |
 |---|---|
-| **Ports:** `gym-policy` (obs → action, world steps) and `video-predict` (media → structured prediction) | Procedures, tasks, label schemas, gym ids |
-| **World adapters:** gym / frames / contract (how we host a world) | Whose video, which anatomy, which sim |
-| **Verifier shape:** vector, abstention, headline rules | Gate ids and metric names the task author declares |
-| **Isolation:** PHI class, subject kind, oracle kind | Which hospital, which BAA, which split |
-| **Identity:** `org/name@version` for datasets *and* agents | Every model and every bench that will exist |
+| **Interaction modes:** closed loop, interactive, single turn, counterfactual | Procedures, tasks, label schemas, gym ids |
+| **Interface shape:** protocol, observation/action/output schemas, required features | Task-authored interface ids and domain vocabularies |
+| **World adapters:** gym, frames, contracts, counterfactual state | Whose video, which anatomy, which simulator |
+| **Verifier shape:** hard gates, typed metrics, abstention | Gate ids, metric names, units, and categories |
+| **Isolation:** PHI class, agent/verifier process boundary, oracle separation | Deployment substrate and institution |
+| **Identity:** `org/name@version` for tasksets and agents | Every model and benchmark that will exist |
 
-A new procedure is a published dataset on an existing port. It is not a new enum, not a new company, and not a Seldinger-authored heuristic.
+A new procedure is a published taskset. A new protocol is declared as an interface and capability; a new interaction shape requires one reviewed harness mode.
 
 **Service (same verb):**
 
 ```bash
-or-audit run -d seldingermed/lumen-nav@0  -a seldingermed/lumen-linear@0
-or-audit run -d acme/cabg-nextstep@0      -a acme/cabg-vlm
+or-audit run -s seldingermed/lumen-nav@0 -a seldingermed/lumen-linear@0
+or-audit run -t docs/examples/tasks/video-nextstep -a docs/examples/agents/example-video-predictor
+or-audit run -t docs/examples/tasks/counterfactual-recovery \
+  -a docs/examples/agents/example-counterfactual-world-model
 ```
 
-`seldingermed/lumen-linear` is a `gym-policy` baseline. `acme/cabg-vlm` is a `video-predict` agent (next-step / outcome on clips). If someone points the VLM at a gym task, **bind refuses**. We do not invent a CABG adapter to paper over a port mismatch. The kernel does not know CABG.
+Binding checks interaction mode, protocol version, schemas, required features, and accepted agent kind. The kernel does not invent a procedure adapter to repair an incompatible package.
 
 **Who brings the oracle?** The task author. Labels, a physics `info` dict, or a contract JSON. If they did not bring labels, we cannot score a CABG model — we do not hallucinate anatomy heuristics. That is the honest limit of a sandbox. It is also why this scales: we run and check shape; we do not maintain a medical ontology of every next-step vocabulary.
 
 **What we will not put in the kernel:** a closed list of specialties (endovascular / laparoscopy / …), Strasberg CVS, Cholec80 phases, “suture throw,” or any other named procedure as a load-bearing type. Those may appear as *tags* or as *submitted tasks*. They are not the product taxonomy. Credentialing-mode perception vocabularies stay in `PLAN.md` mode.
 
-Seed fixtures so both ports exist in-tree (not a catalog of medicine):
+Complete in-tree paths:
 
-- `docs/examples/tasks/lumen-nav-safe` — `gym-policy` (Lumen, first runnable in P1)
-- `docs/examples/tasks/video-nextstep` — `video-predict` (generic next-step / outcome; procedure is the author’s)
-- `docs/examples/agents/seldingermed-lumen-linear` — executable `org/name` baseline on `gym-policy`
-- `docs/examples/agents/example-video-predictor` — `org/name` on `video-predict`
-
+- `docs/examples/tasks/lumen-nav-safe` + `seldingermed-lumen-linear`: closed-loop policy evaluation.
+- `docs/examples/tasks/video-nextstep` + `example-video-predictor`: structured procedural-video reasoning with abstention.
+- `docs/examples/tasks/counterfactual-recovery` + `example-counterfactual-world-model`: consequence ranking, uncertainty, failure, and recovery evidence.
+- `docs/examples/tasksets/counterfactual-recovery-v1`: canonical v0.3 taskset package.
 Open surgery as a distinct haptic/OR-theatre problem is out of scope for v1 (image-guided start). Knowledge-work clinical evals (Doctronic-class) stay out.
 
 ### 1.2 Harbor map (normative)
@@ -75,15 +76,15 @@ Harbor’s objects are the right objects. Harbor’s *world* and *reward* are th
 
 | Harbor | This stack | Keep / change |
 |---|---|---|
-| `harbor` CLI | `or-audit` CLI | Keep the verbs: `run`, `datasets`, `view` (later) |
-| **Task** = instruction + Dockerfile + `tests/` → `reward.txt` | **Task** = `instruction.md` + world spec + vector verifier | Change the world and the verifier |
-| **Dataset** = collection of tasks, optional custom metrics | **Dataset** = collection of tasks; custom metrics must not erase the safety vector | Keep |
-| **Agent** = Claude Code, OpenHands, Terminus, custom `BaseAgent` | **Agent** = policy checkpoint, frozen model, VLM, (later) panel | Keep the interface, change the population |
-| **Environment** = Docker / Daytona / Modal / E2B | **World** = Lumen gym, other Gymnasium sims, FrameSource, AngioStress contract. Containers wrap the *runner*, not the patient | Change |
-| **Trial** = one agent attempt; “a rollout that produces a reward” | **Trial** = one agent attempt; a rollout that produces a **vector**. Reward is an optional projection | Change |
-| **Job** = cartesian product of agents × tasks × attempts | **Job** = same | Keep |
-| Registry of published datasets | Registry of published *procedural* datasets | Keep |
-| Cloud sandboxes for 1000s of containers | GPU workers for batched sims; isolated jobs for weights | Change the substrate |
+| `harbor` CLI | `or-audit` CLI | Keep `run`, `tasksets`, `bind`, `replay`, and registry verbs |
+| **Task** = instruction + Dockerfile + tests → scalar reward | **Task** = instruction + pinned world + interface/harness + vector verifier | Change world, protocol, and verifier |
+| **Dataset** = collection of tasks | **Taskset** = versioned collection of tasks; v0.2 dataset input remains readable | Rename canonical contract |
+| **Agent** = framework-specific coding agent | **Agent** = capability declarations + pinned runtime identity | Generalize interface |
+| **Environment** = container substrate | **World** = Gymnasium, FrameSource, contract, replay, or counterfactual state | Separate runtime substrate from world |
+| **Trial** = rollout producing a reward | **Trial** = typed procedural trace producing gates and typed metrics | Keep vector authoritative |
+| **Job** = agents × tasks × attempts | **Job** = same | Keep |
+| Registry of published datasets | Registry of tasksets and agents | Generalize |
+| Cloud sandboxes | JSON subprocess locally; pinned remote/container descriptors represented | Make isolation explicit |
 | RL via SkyRL; `reward` + token ids | RL via Gymnasium/SB3/SkyRL; **projection** + trajectory | Change the reward |
 | ATIF trajectories (tokens, tools, images) | Procedural trajectories (actions, obs, images, contact, vector) | Keep the idea |
 | `harbor view` job browser | Later; JSON artifacts first | Defer UI |
@@ -93,14 +94,14 @@ Harbor’s objects are the right objects. Harbor’s *world* and *reward* are th
 These are already encoded in the credentialing kernel and must hold on every eval path:
 
 1. **Vector, not scalar.** Hard gates and task metrics report separately. `TrialVector` raises on `float`/`int`/`bool`.
-2. **Headline is safety-aware.** A dataset that reports only raw reach is invalid. Lumen’s lesson: 100% `success`, 6.7% `safe_success`.
-3. **Abstention is a legal outcome** where the oracle cannot see. Physics tasks may set `abstain_ok = false` because contact is decidable. Video/VLM tasks may not.
-4. **PHI class is a field, not a hope.** `procedural` / `public` / `deidentified_clinical` / `prohibited`. Clinical video cannot ride a shared eval cluster without a BAA path.
-5. **Subject kind is a field.** `policy` / `model` / `human`. Human determinations stay refused until `PLAN.md` Phase 0. This plan does not wait on that.
-6. **Oracle kind is a field.** `physics` (sim contact), `contract` (published labels), `panel` (raters), `script` (Harbor’s `solve.sh`, rare).
-7. **Analysis ≠ attestation.** Sim tasks attest nothing. Clinical tasks cannot attest without V-10.
-8. **Replay identity** is `(task_id, task_version, agent_identity, seed, world_pin)`. A leaderboard row without this is a blog post.
-9. **Port is a field.** Every task and every agent names `gym-policy` or `video-predict`. Bind is port match, not procedure match. A third port is a kernel change with tests, not a tag.
+2. **Headline is task-owned.** Tasksets name one metric, but scorecards retain every gate and metric.
+3. **Abstention is a legal outcome.** Missing evidence is `null` / unassessable, never an implicit pass.
+4. **PHI class is explicit.** `procedural` / `public` / `deidentified_clinical` / `prohibited`.
+5. **Subject kind is explicit.** `policy` / `model` / `human`; the eval framework does not emit human determinations.
+6. **Oracle evidence is separated.** Agents receive observations or task inputs; task-owned verifiers receive labels, physics state, or contract evidence.
+7. **Package code is isolated.** Agent and verifier entrypoints use separate subprocesses unless a runtime explicitly declares `trusted-in-process`.
+8. **Replay identity** covers task, agent, runtime, world, interface, trace, vector, projection rule, and artifact head.
+9. **Binding is schema-level.** A capability satisfies interaction mode, protocol version, observations, actions/outputs, features, and accepted agent kind.
 
 ### 1.4 What we will not build
 
@@ -117,61 +118,63 @@ These are already encoded in the credentialing kernel and must hold on every eva
 
 ## 2. What we already have (so we do not rebuild it)
 
-| Asset | Repo | Maps to Harbor | Gap |
+| Asset | Repo | Maps to Harbor | v0.3 integration |
 |---|---|---|---|
-| Vector verifier, abstention, audit chain, de-id gate, agreement harness | `or-audit` | Verifier + artifact | No task/job/trial objects, no runner, no agent protocol for policies |
-| Gym envs `Lumen/Nav*-v0`, `safe_success`, batched Newton, capture/replay | `seldinger-lumen` | Environment + first tasks | Not wrapped as OR-Audit tasks; no pin from this repo |
-| Frozen-model DSA/segmentation contracts, release audit | `angiostress-benchmark` | Dataset + contract oracle | Not a task directory |
-| Equivariance prior for gauges | `gaugeflow` | Optional agent/model family later | Out of P0–P2 |
-| Synthetic video pipeline + credentialing demo | `or-audit` `demo` | A *video* task backend | Still emits a privileging report as if that were the product |
+| Vector verifier, abstention, audit chain, de-id gate, agreement harness | `or-audit` | Verifier + artifact | Shared by typed eval vectors and existing credentialing mode |
+| Gym envs `Lumen/Nav*-v0`, `safe_success`, capture/replay | `seldinger-lumen` | Environment + first tasks | Pinned closed-loop task and policy packages |
+| Frozen-model DSA/segmentation contracts, release audit | `angiostress-benchmark` | Taskset + contract oracle | Single-turn package with claim footer |
+| Counterfactual recovery fixtures | `or-audit` examples | World-model task + agent | Runnable consequence-ranking path |
 
-Build *on* these. The missing product is the Harbor glue plus the first published datasets.
+The Harbor glue now exists in `or_audit.eval`: contracts, capability binding, isolated runtimes, four harness modes, typed traces, tasksets, vectors, scorecards, registry loading, replay, and RL projection export.
 
 ---
 
 ## 3. Architecture
 
+```text
+taskset org/name@version
+        │ tasks
+        ▼
+TaskSpec.interface ── requirements ──► CapabilitySpec[] ── AgentPackage
+        │                                      │
+        └──────────── bind satisfies ──────────┘
+                         │
+                         ▼
+              HarnessSpec.interaction_mode
+      closed-loop | interactive | single-turn | counterfactual
+                         │
+             ┌───────────┴───────────┐
+             ▼                       ▼
+      agent subprocess        verifier subprocess
+      observations only       oracle evidence
+             └───────────┬───────────┘
+                         ▼
+                  ProceduralTrace
+                         +
+                  TrialVector
+             gates[] + typed metrics[]
+                         +
+              optional ProjectionSpec
+                         ▼
+            replay / scorecard / RL export
 ```
-                    ┌──────────── datasets (org/name@version) ─────────┐
-                    │  seldingermed/lumen-nav   acme/cabg-nextstep  …  │
-                    └──────────────────────┬───────────────────────────┘
-                                           │ tasks
-┌─ agent org/name ────┐                    ▼
-│ seldingermed/lumen-linear │  ┌──────────────────────────────┐
-│ acme/cabg-vlm          │─►│  runner  (bind port, then run)│
-│ huggingface/…          │  │  world adapter + verifier    │
-└─────────────────────┘     └──────────────┬───────────────┘
-                                           ▼
-                            ┌──────────────────────────────┐
-                            │ TrialVector                  │
-                            │  gates[]  metrics[]          │
-                            │  headline = task-declared    │
-                            │  optional projection @ ver   │
-                            │  audit head (pinnable)       │
-                            └──────────────┬───────────────┘
-                                           │
-                    ┌──────────────────────┼──────────────────────┐
-                    ▼                      ▼                      ▼
-              leaderboard            RL export              hosted eval
-              (vector rows)     (trajectory + projection)   (GPU workers)
-```
 
-World adapters (Harbor’s Environment — substrate, not anatomy):
+World adapters are substrate, not anatomy:
 
-| `environment.kind` | Implementation | Port it usually serves | Seed |
+| `environment.kind` | Interaction mode | Seed |
+|---|---|---|
+| `lumen-gym`, `gym` | closed loop | `lumen-nav-safe` |
+| `frame-source`, `angiostress-contract` | single turn or interactive | `video-nextstep`, `angiostress-dias`, task-authored turn sequences |
+| `lumen-replay` | closed loop or single turn | captured evidence |
+| `counterfactual` | counterfactual | `counterfactual-recovery` |
+
+Agent packages advertise capabilities:
+
+| Interface seed | Mode | Input → output | Agent |
 |---|---|---|---|
-| `lumen-gym` | Gymnasium make of a pinned Lumen env | `gym-policy` | `lumen-nav-safe` |
-| `gym` | Any other Gymnasium env the task names | `gym-policy` | none in-tree; third-party gym_id |
-| `frame-source` | `or_audit.media.frames.FrameSource` | `video-predict` | `video-nextstep` |
-| `angiostress-contract` | Frozen prediction vs contract JSON | `video-predict` | P2 |
-| `lumen-replay` | Replay a captured Lumen episode | either | dataset generation / SFT |
-
-Agent packages (Harbor’s Agent — identity is `org/name`):
-
-| `port` | Input / output | Seed agent | First runner |
-|---|---|---|---|
-| `gym-policy` | obs → action | `seldingermed/lumen-linear` | P1 |
-| `video-predict` | clip → JSON the task named | `example/video-predictor` | P2 (AngioStress as first real dataset on this port) |
+| `gym-policy` | closed loop | observation → action | `seldingermed/lumen-linear` |
+| `video-predict` | single turn | clip → structured prediction + abstention | `example/video-predictor` |
+| `counterfactual-consequence` | counterfactual | state + interventions → consequence ranking + uncertainty | `example/counterfactual-world-model` |
 
 ---
 

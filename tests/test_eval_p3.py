@@ -124,6 +124,23 @@ def test_job_missing_agent_path(tmp_path: Path) -> None:
         resolve_job(dest)
 
 
+def test_job_projection_must_match_task_declaration(tmp_path: Path) -> None:
+    task_dir = _pinned_lumen(tmp_path)
+    verifier = task_dir / "verifier.toml"
+    verifier.write_text(
+        verifier.read_text(encoding="utf-8").replace('version = "0"', 'version = "2"'),
+        encoding="utf-8",
+    )
+    job_dir = _write_job(tmp_path, task_dir)
+
+    with pytest.raises(TaskContractError, match="projection does not match"):
+        run_cartesian_job(
+            resolve_job(job_dir),
+            out=tmp_path / "mismatch",
+            gym_factory=_fake,
+        )
+
+
 def test_cartesian_random_gym_export_unsafe_is_zero(tmp_path: Path) -> None:
     task_dir = _pinned_lumen(tmp_path)
     job_dir = _write_job(tmp_path, task_dir, n=2)
@@ -150,6 +167,9 @@ def test_cartesian_random_gym_export_unsafe_is_zero(tmp_path: Path) -> None:
     assert by_seed[1]["episode_id"] == "lumen-nav-safe-1"
     assert by_seed[1]["projection_id"] == "gated_reach_v0"
     assert by_seed[0]["task_id"] == "lumen-nav-safe"
+    assert by_seed[0]["projection_rule"]["source_metric"] == "raw_success"
+    assert by_seed[0]["projection_rule"]["gate_failure"] == "zero"
+    assert by_seed[0]["projection_digest"]
 
     trial0 = pair / "trial-lumen-nav-safe-0"
     recon = reconstitute_trial_vector(
@@ -270,7 +290,7 @@ def test_reconstitute_refuses_unknown_trajectory(tmp_path: Path) -> None:
     trial = tmp_path / "trial-x-0"
     trial.mkdir()
     (trial / "trajectory.json").write_text('[{"foo": 1}]\n', encoding="utf-8")
-    with pytest.raises(TaskContractError, match="neither gym-policy"):
+    with pytest.raises(TaskContractError, match="is not gym-policy"):
         reconstitute_trial_vector(
             trial,
             task=load_task(VIDEO_TASK),
@@ -378,8 +398,8 @@ def test_cli_export_rl_refuses_video_gated_reach(tmp_path: Path) -> None:
     )
 
 
-def test_cli_export_rl_refuses_homemade_projection(tmp_path: Path) -> None:
-    with pytest.raises(SystemExit) as exc:
+def test_cli_export_rl_refuses_undeclared_projection(tmp_path: Path) -> None:
+    assert (
         main(
             [
                 "export-rl",
@@ -390,7 +410,8 @@ def test_cli_export_rl_refuses_homemade_projection(tmp_path: Path) -> None:
                 str(tmp_path / "x.jsonl"),
             ]
         )
-    assert exc.value.code == 2
+        == 1
+    )
 
 
 def test_cli_n_overrides_job_n(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

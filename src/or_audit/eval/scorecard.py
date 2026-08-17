@@ -29,33 +29,40 @@ def scorecard_data(result: JobResult) -> dict[str, Any]:
         )
     metrics = []
     for metric_id in metric_ids:
-        values = [trial.vector.metric(metric_id).value for trial in result.trials]  # type: ignore[union-attr]
+        outcomes = [trial.vector.metric(metric_id) for trial in result.trials]
+        definition = outcomes[0]
+        values = [outcome.value for outcome in outcomes if outcome is not None]
         assessed = [value for value in values if value is not None]
         row: dict[str, Any] = {
             "id": metric_id,
             "headline": metric_id == result.headline,
+            "kind": definition.kind.value if definition and definition.kind else "boolean",
+            "unit": definition.unit if definition else "",
+            "direction": definition.direction.value if definition else "neutral",
             "assessed": len(assessed),
             "unassessable": len(values) - len(assessed),
         }
-        if all(isinstance(value, bool) for value in assessed):
+        if row["kind"] == "boolean":
             row.update(
                 {
-                    "kind": "boolean",
                     "true": assessed.count(True),
                     "false": assessed.count(False),
                     "rate": assessed.count(True) / len(assessed) if assessed else None,
                 }
             )
-        else:
-            numeric = [float(value) for value in assessed if not isinstance(value, bool)]
+        elif row["kind"] == "continuous":
+            numeric = [float(value) for value in assessed]
             row.update(
                 {
-                    "kind": "numeric",
                     "mean": fmean(numeric) if numeric else None,
                     "min": min(numeric) if numeric else None,
                     "max": max(numeric) if numeric else None,
                 }
             )
+        else:
+            row["counts"] = {
+                category: assessed.count(category) for category in sorted(set(assessed))
+            }
         metrics.append(row)
     return {
         "task_id": result.task_id,
@@ -64,6 +71,10 @@ def scorecard_data(result: JobResult) -> dict[str, Any]:
         "agent_identity": result.agent_identity,
         "agent_digest": result.agent_digest,
         "world_pin": result.world_pin,
+        "interface_id": result.interface_id,
+        "interaction_mode": result.interaction_mode,
+        "runtime_identity": result.runtime_identity,
+        "projection_identity": result.projection_identity,
         "n": result.n,
         "headline": result.headline,
         "gates": gates,
@@ -81,6 +92,9 @@ def render_markdown(result: JobResult) -> str:
         f"- Agent: `{data['agent_identity']}`",
         f"- Trials: `{data['n']}`",
         f"- World pin: `{data['world_pin'] or 'none'}`",
+        f"- Interface: `{data['interface_id']}` (`{data['interaction_mode']}`)",
+        f"- Runtime identity: `{data['runtime_identity'] or 'none'}`",
+        f"- Projection identity: `{data['projection_identity'] or 'none'}`",
         f"- Task digest: `{data['task_digest']}`",
         f"- Agent digest: `{data['agent_digest']}`",
         f"- Artifact head: `{data['head']}`",
@@ -107,8 +121,13 @@ def render_markdown(result: JobResult) -> str:
     for metric in data["metrics"]:
         if metric["kind"] == "boolean":
             value = "n/a" if metric["rate"] is None else f"{metric['rate']:.6f}"
-        else:
+        elif metric["kind"] == "continuous":
             value = "n/a" if metric["mean"] is None else f"{metric['mean']:.6f}"
+        else:
+            value = (
+                ", ".join(f"{category}: {count}" for category, count in metric["counts"].items())
+                or "n/a"
+            )
         lines.append(
             f"| {metric['id']} | {'yes' if metric['headline'] else 'no'} | {value} | "
             f"{metric['assessed']} | {metric['unassessable']} |"

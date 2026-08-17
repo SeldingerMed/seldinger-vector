@@ -1,7 +1,11 @@
-format_version = "1"
+format_version = "2"
 id = "seldingermed/random"
 agent_version = "0"
-port = "gym-policy"
 kind = "random"
-weights_pin = ""
-entrypoint = ""
+
+[[capabilities]]
+interface = "gym-policy"
+interaction_modes = ["closed-loop"]
+protocol_versions = ["1"]
+observations = ["gym-obs"]
+actions = ["insertion_twist"]

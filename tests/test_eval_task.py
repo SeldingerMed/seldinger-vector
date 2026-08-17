@@ -42,26 +42,57 @@ class TestExampleTaskLoads:
     def test_lumen_nav_safe_is_valid(self):
         task = load_task(EXAMPLE_TASK)
         assert task.id == "lumen-nav-safe"
-        assert task.port.id.value == "gym-policy"
+        assert task.port is None
+        assert task.interface.id == "gym-policy"
         assert task.verifier.headline == "safe_success"
         assert task.projection is not None
-        assert task.projection.id.value == "gated_reach_v0"
+        assert str(task.projection.id) == "gated_reach_v0"
         assert "safe success" in task.instruction.lower()
 
     @pytest.mark.parametrize(
-        ("path", "port"),
+        ("path", "interface"),
         [
             (EXAMPLE_TASK, "gym-policy"),
             (VIDEO_TASK, "video-predict"),
             (ROOT / "docs" / "examples" / "tasks" / "angiostress-dias", "video-predict"),
         ],
     )
-    def test_both_ports_have_a_loadable_seed(self, path: Path, port: str):
+    def test_reference_interfaces_have_a_loadable_seed(self, path: Path, interface: str):
         task = load_task(path)
-        assert task.port.id.value == port
+        assert task.port is None
+        assert task.interface.id == interface
 
-    def test_port_is_required(self, tmp_path):
+    def test_interface_is_required(self, tmp_path):
         dest = _copy_task(tmp_path)
+        interface_block = "\n".join(
+            [
+                "[interface]",
+                'id = "gym-policy"',
+                'interaction_mode = "closed-loop"',
+                'protocol_version = "1"',
+                'observations = ["gym-obs"]',
+                'actions = ["insertion_twist"]',
+                "",
+                "",
+            ]
+        )
+        _patch_toml(dest / "task.toml", interface_block, "")
+        with pytest.raises(TaskContractError, match="interface or legacy port"):
+            load_task(dest)
+
+    def test_legacy_port_normalizes_to_interface(self, tmp_path):
+        dest = _copy_task(tmp_path)
+        interface_block = "\n".join(
+            [
+                "[interface]",
+                'id = "gym-policy"',
+                'interaction_mode = "closed-loop"',
+                'protocol_version = "1"',
+                'observations = ["gym-obs"]',
+                'actions = ["insertion_twist"]',
+                "",
+            ]
+        )
         port_block = "\n".join(
             [
                 "[port]",
@@ -69,12 +100,25 @@ class TestExampleTaskLoads:
                 'observation = "gym-obs"',
                 'action = "insertion_twist"',
                 "",
+            ]
+        )
+        harness_block = "\n".join(
+            [
+                "[harness]",
+                'interaction_mode = "closed-loop"',
+                'protocol_version = "1"',
+                "max_steps = 90",
+                "",
                 "",
             ]
         )
-        _patch_toml(dest / "task.toml", port_block, "")
-        with pytest.raises(TaskContractError, match="port"):
-            load_task(dest)
+        _patch_toml(dest / "task.toml", interface_block, port_block)
+        _patch_toml(dest / "task.toml", harness_block, "")
+
+        task = load_task(dest)
+        assert task.port is not None
+        assert task.port.id.value == "gym-policy"
+        assert task.interface.id == "gym-policy"
 
     def test_procedure_name_is_just_a_tag(self, tmp_path):
         dest = _copy_task(tmp_path)
@@ -85,7 +129,8 @@ class TestExampleTaskLoads:
         )
         task = load_task(dest)
         assert "cabg" in task.metadata.tags
-        assert task.port.id.value == "gym-policy"
+        assert task.port is None
+        assert task.interface.id == "gym-policy"
 
     def test_task_toml_path_also_loads(self):
         assert load_task(EXAMPLE_TASK / "task.toml").id == "lumen-nav-safe"
@@ -170,11 +215,11 @@ class TestContractRefusals:
         with pytest.raises(TaskContractError, match=r"instruction\.md"):
             load_task(dest)
 
-    def test_video_predict_requires_a_prediction_schema(self, tmp_path):
+    def test_single_turn_interface_requires_an_output_schema(self, tmp_path):
         dest = tmp_path / "video-task"
         shutil.copytree(VIDEO_TASK, dest)
-        _patch_toml(dest / "task.toml", 'prediction = "next-step"\n', 'prediction = ""\n')
-        with pytest.raises(TaskContractError, match="prediction"):
+        _patch_toml(dest / "task.toml", 'outputs = ["next-step"]', "outputs = []")
+        with pytest.raises(TaskContractError, match="needs output"):
             load_task(dest)
 
     def test_gym_policy_cannot_use_a_frame_source(self, tmp_path):
@@ -241,10 +286,11 @@ class TestBind:
         with pytest.raises(TaskContractError, match="random"):
             load_agent(dest)
 
-    def test_agent_id_is_org_slash_name(self):
+    def test_agent_id_and_capability_are_canonical(self):
         agent = load_agent(CATH_AGENT)
         assert agent.id == "seldingermed/lumen-linear"
-        assert agent.port.value == "gym-policy"
+        assert agent.port is None
+        assert agent.capabilities[0].interface == "gym-policy"
 
     def test_agent_without_slash_is_rejected(self, tmp_path):
         dest = tmp_path / "agent"
@@ -278,7 +324,8 @@ class TestDataset:
         dataset = load_dataset(VIDEO_DATASET)
         assert dataset.id == "seldingermed/video-nextstep"
         assert dataset.headline == "next_step_correct"
-        assert dataset.tasks[0].port.id.value == "video-predict"
+        assert dataset.tasks[0].port is None
+        assert dataset.tasks[0].interface.id == "video-predict"
 
     def test_headline_mismatch_is_rejected(self, tmp_path):
         dest = tmp_path / "ds"

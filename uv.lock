@@ -597,7 +597,7 @@ wheels = [
 
 [[package]]
 name = "or-audit"
-version = "0.2.0a0"
+version = "0.3.0a0"
 source = { editable = "." }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },

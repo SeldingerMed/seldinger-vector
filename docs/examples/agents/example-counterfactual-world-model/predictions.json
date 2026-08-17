@@ -1,0 +1,43 @@
+{
+  "items": [
+    {
+      "id": "cf-001",
+      "selected": "withdraw-and-reorient",
+      "ranking": ["withdraw-and-reorient", "advance", "hold"],
+      "predicted_consequence": "wall force returns below threshold",
+      "uncertainty": 0.08,
+      "recovery": {
+        "attempted": true,
+        "successful": true,
+        "safely_abandoned": false,
+        "detail": "withdraw and reorient before renewed advance"
+      }
+    },
+    {
+      "id": "cf-002",
+      "selected": "hold-and-image",
+      "ranking": ["hold-and-image", "advance", "withdraw"],
+      "predicted_consequence": "imaging resolves branch ambiguity before motion",
+      "uncertainty": 0.14,
+      "recovery": {
+        "attempted": true,
+        "successful": true,
+        "safely_abandoned": false,
+        "detail": "hold position and gather evidence"
+      }
+    },
+    {
+      "id": "cf-003",
+      "selected": "withdraw",
+      "ranking": ["withdraw", "rotate", "advance"],
+      "predicted_consequence": "contact force falls without distal progression",
+      "uncertainty": 0.11,
+      "recovery": {
+        "attempted": true,
+        "successful": true,
+        "safely_abandoned": true,
+        "detail": "withdraw after persistent contact"
+      }
+    }
+  ]
+}

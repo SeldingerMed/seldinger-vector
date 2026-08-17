@@ -1,0 +1,21 @@
+format_version = "2"
+id = "example/counterfactual-world-model"
+agent_version = "1"
+kind = "world-model"
+weights_pin = "560bac6cfabf426401ba45049c27178af49f389b9296deb9d491de56b9ea6baa"
+weights_path = "predictions.json"
+entrypoint = "predictor.py:load_predictor"
+
+[[capabilities]]
+interface = "counterfactual-consequence"
+interaction_modes = ["counterfactual"]
+protocol_versions = ["1"]
+observations = ["procedural-state", "candidate-interventions"]
+outputs = ["consequence-ranking"]
+features = ["uncertainty"]
+
+[runtime]
+kind = "local"
+protocol_version = "1"
+entrypoint = "predictor.py:load_predictor"
+timeout_sec = 30.0

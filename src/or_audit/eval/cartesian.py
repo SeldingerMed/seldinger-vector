@@ -124,6 +124,11 @@ def run_cartesian_job(
     for task_path in resolved.task_paths:
         task_dir = task_path if task_path.is_dir() else task_path.parent
         task: TaskSpec = load_task(task_path)
+        if resolved.config.projection is not None and task.projection != resolved.config.projection:
+            raise TaskContractError(
+                f"job {resolved.config.id} projection does not match the "
+                f"task-declared projection for {task.id}"
+            )
         for agent_ref in resolved.agent_refs:
             agent, agent_dir = _agent_from_ref(agent_ref)
             dirname = pair_dir_name(task.id, agent.id)

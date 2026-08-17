@@ -1,13 +1,8 @@
-"""Closed vocabularies for eval tasks.
+"""Closed kernel vocabularies and compatibility names for eval packages.
 
-Harbor gets by with a Dockerfile and a float. Procedural medical evals have to
-name the *port*, the world, the oracle, the subject, and the PHI class up
-front or the runner will silently do the wrong thing. These enums are the
-fields Harbor does not have; BUILD.md section 1.3 treats them as
-non-negotiable.
-
-Ports are the finite set. Procedures are not: CABG next-step, a cath policy,
-and a model we have never heard of all share a port or they do not bind.
+Interaction mode, runtime adapter, PHI class, and world adapter select kernel
+behavior and remain closed. Interface ids and agent kinds are package-authored
+slugs; ``PortId`` and ``AgentKind`` only preserve well-known v0.2 names.
 """
 
 from __future__ import annotations
@@ -39,20 +34,11 @@ class PhiClass(StrEnum):
 
 
 class PortId(StrEnum):
-    """I/O contract between an agent and a task.
+    """Well-known v0.2 port names retained for compatibility.
 
-    This is the finite set. Harbor's analog is "the agent speaks to a
-    shell inside Docker." We cannot put an OR in a container, so we name
-    the two ways a procedural model actually talks:
-
-    * ``gym-policy`` — closed loop: observation in, action out, world steps.
-    * ``video-predict`` — open loop: media in, structured prediction out
-      (next step, outcome, mask, phase — the *field names* are the task
-      author's, not a medical ontology we maintain).
-
-    A new procedure is a new dataset on one of these ports, not a new
-    enum member. If a third port is ever needed it is a kernel change
-    with tests, not a tag.
+    Canonical v0.3 tasks use open interface slugs plus explicit interaction,
+    protocol, and schema requirements. New interfaces do not require an enum
+    member.
     """
 
     GYM_POLICY = "gym-policy"
@@ -73,6 +59,7 @@ class WorldKind(StrEnum):
     GYM = "gym"
     ANGIOSTRESS_CONTRACT = "angiostress-contract"
     FRAME_SOURCE = "frame-source"
+    COUNTERFACTUAL = "counterfactual"
 
 
 class OracleKind(StrEnum):
@@ -85,10 +72,11 @@ class OracleKind(StrEnum):
 
 
 class AgentKind(StrEnum):
-    """What produces actions or predictions."""
+    """Well-known agent-kind names; canonical package fields accept any slug."""
 
     POLICY = "policy"
     FROZEN_MODEL = "frozen-model"
+    WORLD_MODEL = "world-model"
     VLM = "vlm"
     PANEL = "panel"
     RANDOM = "random"

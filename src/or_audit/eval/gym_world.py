@@ -147,10 +147,11 @@ def run_gym_episode(
     *,
     seed: int,
     action_fn: Callable[[GymEnv, Any, int], Any],
+    reset_options: dict[str, Any] | None = None,
     max_steps: int = 10_000,
 ) -> tuple[dict[str, Any], tuple[dict[str, Any], ...]]:
     """Roll out one episode. Returns final info and the trajectory."""
-    obs, _reset_info = env.reset(seed=seed)
+    obs, _reset_info = env.reset(seed=seed, options=reset_options)
     steps: list[dict[str, Any]] = []
     info: Any = {}
     for step_i in range(max_steps):

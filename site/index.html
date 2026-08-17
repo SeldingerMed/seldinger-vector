@@ -3,15 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f7f6f2">
-  <meta name="description" content="Run procedural medical AI against pinned tasks and get replayable vector scorecards that keep safety failures visible.">
+  <meta name="theme-color" content="#ff5a1f">
+  <meta name="description" content="Run procedural AI models against versioned tasks and ship replayable evaluation artifacts with OR-Audit.">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="OR-Audit | Independent evaluation for procedural medical AI">
-  <meta property="og:description" content="Pinned tasks. Vector safety gates. Replayable artifacts. No self-issued aggregate score.">
+  <meta property="og:title" content="OR-Audit | Put your model under a real test">
+  <meta property="og:description" content="Package the model. Bind the task. Execute every trial. Replay the exact result.">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="OR-Audit">
-  <meta name="twitter:description" content="Independent evaluation for procedural medical AI.">
-  <title>OR-Audit | Independent evaluation for procedural medical AI</title>
+  <meta name="twitter:description" content="The evaluation layer for procedural AI.">
+  <title>OR-Audit | The evaluation layer for procedural AI</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
   <script src="/app.js" defer></script>
@@ -19,270 +19,227 @@
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
 
-  <div class="release-bar" role="status">
-    <span><span class="signal signal-live" aria-hidden="true"></span> Public alpha v0.2</span>
-    <a href="https://github.com/SeldingerMed/or-audit/pull/9">P4 product loop shipped <span aria-hidden="true">↗</span></a>
+  <div class="motion-ribbon" aria-hidden="true">
+    <div class="ribbon-track">
+      <span>TASK PIN</span><i></i><span>AGENT PIN</span><i></i><span>TRIAL VECTOR</span><i></i><span>ARTIFACT HEAD</span><i></i><span>REPLAY</span><i></i>
+      <span>TASK PIN</span><i></i><span>AGENT PIN</span><i></i><span>TRIAL VECTOR</span><i></i><span>ARTIFACT HEAD</span><i></i><span>REPLAY</span><i></i>
+    </div>
   </div>
 
   <header class="site-header">
     <a class="brand" href="#top" aria-label="OR-Audit home">
-      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-        <circle cx="16" cy="16" r="11.5"></circle>
-        <path d="M16 4.5v23M4.5 16h23"></path>
-        <circle cx="16" cy="16" r="3"></circle>
+      <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
+        <circle class="brand-orbit" cx="20" cy="20" r="16"></circle>
+        <path d="M20 4v32M4 20h32"></path>
+        <circle class="brand-core" cx="20" cy="20" r="4"></circle>
       </svg>
       <span>OR/AUDIT</span>
     </a>
     <nav aria-label="Primary navigation">
-      <a href="#runs">Public runs</a>
-      <a href="#contract">Contract</a>
-      <a href="#limits">Limits</a>
+      <a href="#system">How it runs</a>
+      <a href="#example">Example</a>
+      <a href="#artifact">Output</a>
     </nav>
-    <a class="header-link" href="https://github.com/SeldingerMed/or-audit">GitHub <span aria-hidden="true">↗</span></a>
+    <a class="header-action" href="https://github.com/SeldingerMed/or-audit">View source <span aria-hidden="true">↗</span></a>
   </header>
 
   <main id="main">
     <section class="hero" id="top" aria-labelledby="hero-title">
+      <div class="hero-grid" aria-hidden="true"></div>
       <div class="hero-copy">
-        <p class="kicker">Independent evaluation for procedural medical AI</p>
-        <h1 id="hero-title">Evaluate procedural medical AI without grading your own work.</h1>
-        <p class="hero-deck">Run policies and frozen models against pinned tasks. Get a replayable vector scorecard that cannot hide a safety failure inside success rate.</p>
+        <p class="eyebrow hero-eyebrow">Evaluation infrastructure for procedural AI</p>
+        <h1 id="hero-title"><span>Your model.</span><span class="hero-accent">Under a real test.</span></h1>
+        <p class="hero-deck">Package any procedural model. Bind it to a versioned task. OR-Audit executes every trial and ships the result as a replayable evidence bundle.</p>
+        <div class="hero-actions">
+          <a class="button button-dark" href="https://github.com/SeldingerMed/or-audit#development">Run OR-Audit <span aria-hidden="true">→</span></a>
+          <a class="button button-line" href="#example">Inspect a complete run</a>
+        </div>
       </div>
 
-      <aside class="evidence-rail" aria-label="Evidence available now">
-        <p class="rail-label">Evidence available now</p>
-        <dl>
-          <div><dt>Execution</dt><dd>Physics + frozen model</dd></div>
-          <div><dt>Public runs</dt><dd>3 packages</dd></div>
-          <div><dt>Ports</dt><dd>2 explicit contracts</dd></div>
-          <div><dt>Replay</dt><dd>Content-addressed</dd></div>
-        </dl>
-        <p class="rail-note">Not clinical validation. Not a composite leaderboard.</p>
-      </aside>
+      <figure class="engine-figure" aria-label="A task and agent bind, execute, and produce a vector artifact">
+        <svg class="engine-map" viewBox="0 0 760 620" role="img" aria-labelledby="engine-title engine-desc">
+          <title id="engine-title">OR-Audit execution map</title>
+          <desc id="engine-desc">Versioned task and agent packages flow into the evaluation core, then produce trial vectors and a replayable artifact.</desc>
+          <defs>
+            <filter id="soft-glow" x="-80%" y="-80%" width="260%" height="260%">
+              <feGaussianBlur stdDeviation="8"></feGaussianBlur>
+            </filter>
+          </defs>
+          <g class="engine-radar">
+            <circle cx="380" cy="310" r="205"></circle>
+            <circle cx="380" cy="310" r="132"></circle>
+            <circle cx="380" cy="310" r="64"></circle>
+            <path d="M380 72V548M142 310H618"></path>
+          </g>
+          <g class="flow-lines">
+            <path class="flow-line flow-line-a" d="M84 158 C210 158 212 265 326 286"></path>
+            <path class="flow-line flow-line-b" d="M84 462 C210 462 212 355 326 334"></path>
+            <path class="flow-line flow-line-c" d="M434 310 C536 310 554 310 680 310"></path>
+          </g>
+          <circle class="packet packet-a" r="7"></circle>
+          <circle class="packet packet-b" r="7"></circle>
+          <circle class="packet packet-c" r="7"></circle>
+          <g class="node node-task" transform="translate(84 158)">
+            <circle r="44"></circle><circle class="node-pulse" r="8"></circle>
+          </g>
+          <g class="node node-agent" transform="translate(84 462)">
+            <circle r="44"></circle><circle class="node-pulse" r="8"></circle>
+          </g>
+          <g class="engine-core" transform="translate(380 310)">
+            <circle class="core-glow" r="74" filter="url(#soft-glow)"></circle>
+            <circle class="core-ring core-ring-outer" r="64"></circle>
+            <circle class="core-ring core-ring-inner" r="48"></circle>
+            <path d="M-16 0H16M0-16V16"></path>
+            <circle r="8"></circle>
+          </g>
+          <g class="node node-output" transform="translate(680 310)">
+            <rect x="-43" y="-43" width="86" height="86" rx="2"></rect>
+            <path d="M-22-17H22M-22 0H10M-22 17H18"></path>
+          </g>
+        </svg>
+        <div class="map-label label-task"><small>INPUT 01</small><strong>VERSIONED TASK</strong><code>org/task@version</code></div>
+        <div class="map-label label-agent"><small>INPUT 02</small><strong>MODEL PACKAGE</strong><code>org/agent@version</code></div>
+        <div class="map-label label-core"><small>OR/AUDIT</small><strong>BIND + EXECUTE</strong></div>
+        <div class="map-label label-output"><small>OUTPUT</small><strong>VECTOR ARTIFACT</strong><code>sha256:…</code></div>
+        <div class="engine-readout" aria-hidden="true">
+          <span><i></i> port compatible</span>
+          <span><i></i> task pinned</span>
+          <span><i></i> evidence streaming</span>
+        </div>
+      </figure>
 
       <div class="command-bench" aria-label="Run a public evaluation">
-        <div class="bench-head">
-          <span>Run a pinned public evaluation</span>
-          <span>Python 3.11+</span>
-        </div>
+        <div class="bench-head"><span>RUN A PINNED PUBLIC EVALUATION</span><span>PYTHON 3.11+</span></div>
         <div class="command-line">
           <span class="prompt" aria-hidden="true">$</span>
           <code id="run-command">uvx --from git+https://github.com/SeldingerMed/or-audit.git@5f384e5874ee6769d48ca2d12cb1162cfb00d768 or-audit run -d seldingermed/video-nextstep@0 -a example/video-predictor@0 --out ./runs/video-nextstep</code>
-          <button class="copy-button" type="button" data-copy-target="run-command" aria-describedby="copy-status">
-            <span class="copy-label">Copy</span>
-          </button>
+          <button class="copy-button" type="button" data-copy-target="run-command" aria-describedby="copy-status"><span class="copy-label">Copy command</span></button>
         </div>
         <p class="copy-status" id="copy-status" aria-live="polite"></p>
       </div>
+    </section>
 
-      <div class="hero-foot">
-        <a class="text-link" href="https://github.com/SeldingerMed/or-audit#development">Read the run contract <span aria-hidden="true">→</span></a>
-        <span>First run: 3 held-out video trials, including one explicit abstention</span>
+    <section class="signal-strip" aria-label="Supported evaluation inputs">
+      <p>ONE HARNESS</p>
+      <div class="signal-items">
+        <span>SIM POLICIES</span><i></i><span>PROCEDURAL VIDEO</span><i></i><span>FROZEN MODELS</span><i></i><span>WORLD MODELS</span>
       </div>
     </section>
 
-    <section class="runs-section" id="runs" aria-labelledby="runs-title">
-      <div class="section-intro">
-        <p class="section-index">01 / Public evidence</p>
-        <div>
-          <h2 id="runs-title">Three published runs. No overall score.</h2>
-          <p>Every row keeps its task, package identity, world pin, gates, metrics, and artifact head. Open a row to inspect the vector.</p>
-        </div>
+    <section class="system-section" id="system" aria-labelledby="system-title">
+      <div class="section-heading" data-reveal>
+        <p class="eyebrow">The execution path</p>
+        <h2 id="system-title">From model package to inspectable result.</h2>
+        <p>OR-Audit gives task authors control of the test and model teams a stable interface to run it. The kernel handles the contract between them.</p>
       </div>
 
-      <div class="run-ledger" aria-label="Published OR-Audit runs">
-        <div class="ledger-head" aria-hidden="true">
-          <span>Task / environment</span><span>Trials</span><span>Headline</span><span>Safety gates</span><span>Artifact</span>
-        </div>
-
-        <details class="run" open>
-          <summary>
-            <span class="run-name"><strong>lumen-nav-safe</strong><small>gym-policy · pinned physics</small></span>
-            <span class="run-trials" data-label="Trials">30</span>
-            <span class="run-headline" data-label="Headline"><span class="state-mark state-pass">PASS</span> 30 / 30 safe_success</span>
-            <span class="run-gates" data-label="Safety gates">0 failed</span>
-            <span class="run-hash" data-label="Artifact"><code>f912a43b…a95b7c</code></span>
-          </summary>
-          <div class="run-detail">
-            <dl class="vector-list">
-              <div><dt>raw_success</dt><dd>true</dd></div>
-              <div><dt>safe_success</dt><dd>true</dd></div>
-              <div><dt>max_pen</dt><dd>0.0</dd></div>
-              <div><dt>diverged</dt><dd>false</dd></div>
-            </dl>
-            <dl class="provenance-list">
-              <div><dt>Agent</dt><dd><code>seldingermed/lumen-linear@0+a000e3af…</code></dd></div>
-              <div><dt>World pin</dt><dd><code>3c6bb39ecc916c73e81131b94353ad8deee62bd4</code></dd></div>
-              <div><dt>Artifact head</dt><dd><code>f912a43b5385f6befa0e3a4e4a54bf9cf4525dc1ae8e5663b8ad2d8033a95b7c</code></dd></div>
-            </dl>
-          </div>
-        </details>
-
-        <details class="run">
-          <summary>
-            <span class="run-name"><strong>video-nextstep</strong><small>video-predict · held-out split</small></span>
-            <span class="run-trials" data-label="Trials">3</span>
-            <span class="run-headline" data-label="Headline"><span class="state-mark state-mixed">MIXED</span> 2 correct · 1 abstained</span>
-            <span class="run-gates" data-label="Safety gates">1 failed</span>
-            <span class="run-hash" data-label="Artifact"><code>b09ed7b5…391682</code></span>
-          </summary>
-          <div class="run-detail">
-            <dl class="vector-list">
-              <div><dt>next_step_correct</dt><dd>1.0 assessed</dd></div>
-              <div><dt>outcome_correct</dt><dd>1.0 assessed</dd></div>
-              <div><dt>abstained</dt><dd>0.3333</dd></div>
-              <div><dt>unassessable</dt><dd>1 / 3</dd></div>
-            </dl>
-            <dl class="provenance-list">
-              <div><dt>Agent</dt><dd><code>example/video-predictor@0+b3fb4895…</code></dd></div>
-              <div><dt>Interpretation</dt><dd>The assessed predictions were correct. One trial abstained and one safety gate failed. The row does not silently convert either event into a lower mean.</dd></div>
-              <div><dt>Artifact head</dt><dd><code>b09ed7b5bcde2e588a8f4773e313197ece5cf365b8e947abb8da75a16f391682</code></dd></div>
-            </dl>
-          </div>
-        </details>
-
-        <details class="run">
-          <summary>
-            <span class="run-name"><strong>angiostress-dias</strong><small>frozen-model · release audit</small></span>
-            <span class="run-trials" data-label="Trials">1 audit</span>
-            <span class="run-headline" data-label="Headline"><span class="state-mark state-pass">PASS</span> release audit</span>
-            <span class="run-gates" data-label="Safety gates">0 failed</span>
-            <span class="run-hash" data-label="Artifact"><code>eaf11df7…59ddd0ee</code></span>
-          </summary>
-          <div class="run-detail">
-            <dl class="vector-list vector-list-wide">
-              <div><dt>CathAction predictions</dt><dd>15,675</dd></div>
-              <div><dt>DIAS predictions</dt><dd>345</dd></div>
-              <div><dt>SAM ViT-B mean Dice</dt><dd>0.3658</dd></div>
-              <div><dt>MedSAM ViT-B mean Dice</dt><dd>0.1167</dd></div>
-            </dl>
-            <dl class="provenance-list">
-              <div><dt>Agent</dt><dd><code>seldingermed/cath-seg@0+b62b36f8…</code></dd></div>
-              <div><dt>Boundary</dt><dd>This verifies the published benchmark release contract and derived outputs. It is not clinical validation or evidence of synthetic-to-real transfer.</dd></div>
-              <div><dt>Artifact head</dt><dd><code>eaf11df78714bb717c2488d90ad6631516a7558bf26143960281c88759ddd0ee</code></dd></div>
-            </dl>
-          </div>
-        </details>
-      </div>
-
-      <div class="source-line">
-        <span>Registry snapshot: 14 Aug 2026</span>
-        <a href="https://github.com/SeldingerMed/seldinger-tasks/blob/main/site/leaderboard.json">Inspect source JSON <span aria-hidden="true">↗</span></a>
-      </div>
-    </section>
-
-    <section class="contract-section" id="contract" aria-labelledby="contract-title">
-      <div class="section-intro">
-        <p class="section-index">02 / The contract</p>
-        <div>
-          <h2 id="contract-title">One path from package to replay.</h2>
-          <p>The kernel knows ports and invariants, not procedure names. Task authors bring the world and verifier. Agent authors bring the executable package.</p>
-        </div>
-      </div>
-
-      <ol class="contract-chain">
-        <li><span>01</span><h3>Bind</h3><p>Refuse incompatible task and agent ports before execution.</p><code>gym-policy ↔ gym-policy</code></li>
-        <li><span>02</span><h3>Run</h3><p>Execute immutable packages against a pinned world or held-out split.</p><code>org/name@version</code></li>
-        <li><span>03</span><h3>Verify</h3><p>Emit hard gates, soft metrics, and abstention as separate outcomes.</p><code>TrialVector[]</code></li>
-        <li><span>04</span><h3>Replay</h3><p>Reconstruct the result from a self-contained, content-addressed bundle.</p><code>--expect-head</code></li>
+      <ol class="system-steps">
+        <li data-reveal>
+          <span class="step-number">01</span>
+          <div><h3>Package the test</h3><p>Pin the environment, inputs, verifier, metrics, and gates under one versioned task identity.</p></div>
+          <code>org/task@version</code>
+        </li>
+        <li data-reveal>
+          <span class="step-number">02</span>
+          <div><h3>Bind the model</h3><p>Match the task and agent through an explicit port before any compute starts.</p></div>
+          <code>video-predict ↔ video-predict</code>
+        </li>
+        <li data-reveal>
+          <span class="step-number">03</span>
+          <div><h3>Execute every trial</h3><p>Run the pinned packages and record metrics, gates, abstentions, and evidence trial by trial.</p></div>
+          <code>TrialVector[]</code>
+        </li>
+        <li data-reveal>
+          <span class="step-number">04</span>
+          <div><h3>Replay the result</h3><p>Hand the complete bundle to another team. They can reconstruct the run and match its artifact head.</p></div>
+          <code>or-audit replay</code>
+        </li>
       </ol>
     </section>
 
-    <section class="vector-section" aria-labelledby="vector-title">
-      <div class="vector-copy">
-        <p class="section-index">03 / Why a vector</p>
-        <h2 id="vector-title">A mean can absorb injury. A gate cannot.</h2>
-        <p>Reach, accuracy, and Dice can be useful metrics. None is permission to erase a penetration event, a missing observation, or a refusal to answer.</p>
-        <p class="vector-caption">Illustrative failure case, not a published result.</p>
+    <section class="artifact-section" id="artifact" aria-labelledby="artifact-title">
+      <div class="artifact-copy" data-reveal>
+        <p class="eyebrow">One run, complete evidence</p>
+        <h2 id="artifact-title">A result you can open, replay, and hand off.</h2>
+        <p>Each job carries the task package, model package, configuration, per-trial vectors, trajectory, scorecard, and a content-derived head. The evidence moves with the result.</p>
+        <a class="inline-link" href="https://github.com/SeldingerMed/or-audit/blob/main/docs/BUILD.md">Read the artifact contract <span aria-hidden="true">↗</span></a>
       </div>
 
-      <div class="comparison" aria-label="Scalar and vector result comparison">
-        <div class="scalar-side">
-          <span class="comparison-label">Rejected representation</span>
-          <p class="scalar-value">0.93</p>
-          <p>“overall performance”</p>
-          <span class="rejected-stamp">INSUFFICIENT</span>
-        </div>
-        <div class="vector-side">
-          <span class="comparison-label">Published representation</span>
+      <div class="artifact-stage" data-reveal aria-label="Layers inside an OR-Audit result bundle">
+        <div class="artifact-orbit orbit-one" aria-hidden="true"></div>
+        <div class="artifact-orbit orbit-two" aria-hidden="true"></div>
+        <div class="artifact-sheet sheet-back" aria-hidden="true"><span>BUNDLE / PACKAGES</span></div>
+        <div class="artifact-sheet sheet-mid" aria-hidden="true"><span>TRAJECTORY / EVIDENCE</span></div>
+        <div class="artifact-sheet sheet-front">
+          <div class="sheet-head"><span>TRIAL VECTOR</span><span>03 / 03</span></div>
           <dl>
-            <div><dt>raw_success</dt><dd>true</dd></div>
-            <div><dt>safe_success</dt><dd>false</dd></div>
-            <div><dt>max_pen</dt><dd>0.41</dd></div>
-            <div><dt>diverged</dt><dd>false</dd></div>
-            <div class="failed-vector"><dt>wall_contact</dt><dd>FAILED</dd></div>
+            <div><dt>next_step_correct</dt><dd>assessed</dd></div>
+            <div><dt>outcome_correct</dt><dd>assessed</dd></div>
+            <div><dt>abstained</dt><dd>true</dd></div>
+            <div><dt>artifact_head</dt><dd><code>b09ed7b5…</code></dd></div>
+          </dl>
+          <div class="sheet-scan" aria-hidden="true"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="example-section" id="example" aria-labelledby="example-title">
+      <div class="example-intro" data-reveal>
+        <p class="eyebrow">Public example 001</p>
+        <h2 id="example-title">Three held-out clips. One frozen predictor. Every outcome visible.</h2>
+      </div>
+
+      <div class="example-layout">
+        <div class="test-brief" data-reveal>
+          <p class="brief-label">Exactly what was tested</p>
+          <p class="brief-lead">A frozen predictor received three held-out procedural clips. For each clip, it had to predict the next step and outcome, report an unsafe state when present, or abstain.</p>
+          <dl>
+            <div><dt>Task</dt><dd><code>seldingermed/video-nextstep@0</code></dd></div>
+            <div><dt>Agent</dt><dd><code>example/video-predictor@0</code></dd></div>
+            <div><dt>Protocol</dt><dd>video-clip → next-step + outcome</dd></div>
+            <div><dt>Episodes</dt><dd>3 held-out clips</dd></div>
           </dl>
         </div>
-      </div>
-    </section>
 
-    <section class="artifact-section" aria-labelledby="artifact-title">
-      <div class="section-intro">
-        <p class="section-index">04 / What ships</p>
-        <div>
-          <h2 id="artifact-title">The evidence travels with the result.</h2>
-          <p>A run is a directory, not a screenshot. It contains the packages, configuration, trial vectors, deterministic scorecards, projection when requested, and a head derived from the payload.</p>
-        </div>
-      </div>
-
-      <div class="artifact-anatomy">
-        <div class="file-tree" aria-label="Replayable job bundle files">
-          <span>runs/video-nextstep/</span>
-          <span>├── <strong>bundle/</strong></span>
-          <span>│&nbsp;&nbsp; ├── task/</span>
-          <span>│&nbsp;&nbsp; └── agent/</span>
-          <span>├── <strong>config.json</strong></span>
-          <span>└── video-nextstep/</span>
-          <span>&nbsp;&nbsp;&nbsp; ├── result.json</span>
-          <span>&nbsp;&nbsp;&nbsp; ├── trajectory.json</span>
-          <span>&nbsp;&nbsp;&nbsp; ├── scorecard.html</span>
-          <span>&nbsp;&nbsp;&nbsp; └── projection.json <em>optional</em></span>
-        </div>
-        <div class="attestation">
-          <p class="attestation-label">Artifact head</p>
-          <code>b09ed7b5bcde2e588a8f4773e313197ece5cf365b8e947abb8da75a16f391682</code>
-          <div class="attestation-seal" aria-label="Replay matched">
-            <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="21"></circle><path d="m15 24 6 6 13-14"></path></svg>
-            <span><strong>Replay matched</strong><small>Payload and stored head agree</small></span>
+        <div class="run-result" data-reveal>
+          <div class="result-head"><span>PUBLISHED RESULT</span><code>b09ed7b5…391682</code></div>
+          <div class="result-main"><strong>2 / 2</strong><span>assessed predictions matched the next-step and outcome labels</span></div>
+          <div class="result-vector">
+            <div><span>Abstained</span><strong>1 / 3</strong></div>
+            <div><span>Unsafe gate</span><strong>1 failed</strong></div>
+            <div><span>Artifact</span><strong>Replay matched</strong></div>
           </div>
+          <p>Two assessed clips matched their labels. The predictor abstained on the third. One assessed trial emitted <code>unsafe=true</code>, which activated the task’s declared safety gate.</p>
         </div>
       </div>
-    </section>
 
-    <section class="limits-section" id="limits" aria-labelledby="limits-title">
-      <div class="section-intro">
-        <p class="section-index">05 / Boundaries</p>
-        <div>
-          <h2 id="limits-title">What this evidence does not say.</h2>
-          <p>Trust starts with a system that names the edge of its claim.</p>
-        </div>
+      <div class="evidence-links" data-reveal aria-label="Example source links">
+        <a href="https://github.com/SeldingerMed/or-audit"><span>01</span><strong>Open the product</strong><small>SeldingerMed/or-audit ↗</small></a>
+        <a href="https://github.com/SeldingerMed/seldinger-tasks/tree/main/datasets/seldingermed/video-nextstep/0"><span>02</span><strong>Open the task</strong><small>inputs + labels + verifier ↗</small></a>
+        <a href="https://github.com/SeldingerMed/seldinger-tasks/tree/main/agents/example/video-predictor/0"><span>03</span><strong>Open the agent</strong><small>package + predictions ↗</small></a>
+        <a href="https://github.com/SeldingerMed/seldinger-tasks/blob/main/site/leaderboard.json"><span>04</span><strong>Open the published run</strong><small>vector + pins + artifact head ↗</small></a>
       </div>
-      <ul class="limits-list">
-        <li><span>01</span><p>The public Lumen row is a pinned simulation result, not proof of clinical safety or sim-to-real transfer.</p></li>
-        <li><span>02</span><p>The AngioStress row verifies a benchmark release contract, not model improvement, regulatory performance, or patient benefit.</p></li>
-        <li><span>03</span><p>Credentialing named surgeons remains a gated future mode. This release evaluates procedural models and agents.</p></li>
-        <li><span>04</span><p>OR-Audit is alpha software. Package contracts and artifact formats are runnable, but the service layer is not yet hosted.</p></li>
-      </ul>
     </section>
 
     <section class="final-cta" aria-labelledby="cta-title">
-      <p class="section-index">Run the product</p>
-      <h2 id="cta-title">Bring a task or an agent.</h2>
-      <p>OR-Audit does not need a procedure enum. It needs an explicit port, a verifier, and evidence it can replay.</p>
+      <div class="cta-scan" aria-hidden="true"></div>
+      <p class="eyebrow">Ship the test with the model</p>
+      <h2 id="cta-title">Your next claim starts with a run.</h2>
+      <p>Bring a versioned task or a packaged agent. OR-Audit turns the pairing into evidence another team can inspect and replay.</p>
       <div class="cta-actions">
-        <a class="primary-action" href="https://github.com/SeldingerMed/or-audit#development">Run an evaluation <span aria-hidden="true">→</span></a>
-        <a class="secondary-action" href="https://github.com/SeldingerMed/seldinger-tasks">Inspect public packages <span aria-hidden="true">↗</span></a>
+        <a class="button button-orange" href="https://github.com/SeldingerMed/or-audit#development">Run your first evaluation <span aria-hidden="true">→</span></a>
+        <a class="button button-dark-line" href="https://github.com/SeldingerMed/seldinger-tasks">Browse public packages <span aria-hidden="true">↗</span></a>
       </div>
     </section>
   </main>
 
   <footer>
     <a class="brand footer-brand" href="#top"><span>OR/AUDIT</span></a>
-    <p>Vector verification and attestation for procedural medical AI.</p>
+    <p>Evaluation infrastructure for procedural AI.</p>
     <div>
       <a href="https://github.com/SeldingerMed/or-audit">Source</a>
       <a href="https://github.com/SeldingerMed/seldinger-tasks">Registry</a>
-      <a href="https://github.com/SeldingerMed/or-audit/blob/main/docs/BUILD.md">Build plan</a>
+      <a href="https://github.com/SeldingerMed/or-audit/blob/main/docs/BUILD.md">Contract</a>
     </div>
   </footer>
 </body>

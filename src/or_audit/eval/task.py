@@ -1,26 +1,33 @@
-"""The Harbor task, with the fields medicine actually needs.
-
-A Harbor task is instruction + container + tests that write ``reward.txt``.
-A task here is instruction + world + vector verifier. The directory layout
-is deliberately Harbor-shaped so the analog is obvious:
-
-```
-<task>/
-  task.toml
-  instruction.md
-  verifier.toml     # optional; the RL projection lives here, not in the vector
-```
-"""
+"""Task-owned v0.3 evaluation contracts with deterministic v0.2 normalization."""
 
 from __future__ import annotations
 
-from typing import Annotated, Self
+import hashlib
+import json
+from typing import Annotated, Any, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from or_audit.errors import TaskContractError
+from or_audit.eval.contracts import (
+    GateProjectionPolicy,
+    HarnessSpec,
+    InteractionMode,
+    InterfaceSpec,
+    MetricDirection,
+    MetricKind,
+    PerturbationSpec,
+    ScenarioSpec,
+    legacy_interface,
+)
 from or_audit.eval.enums import (
-    AgentKind,
     AttestationLevel,
     OracleKind,
     PhiClass,
@@ -36,19 +43,29 @@ Slug = Annotated[
 NonEmpty = Annotated[str, StringConstraints(min_length=1, max_length=200)]
 Instruction = Annotated[str, StringConstraints(min_length=1, max_length=20_000)]
 
+_BOOLEAN_METRICS = {
+    "abstained",
+    "diverged",
+    "next_step_correct",
+    "outcome_correct",
+    "raw_success",
+    "release_audit_passed",
+    "safe_success",
+    "failure_detected",
+    "recovered",
+    "safe_abandonment",
+    "unsafe_persistence",
+    "harm_after_failure",
+    "handoff_accepted",
+}
+
 
 class _Frozen(BaseModel):
-    """Immutable task records."""
-
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
 class TaskMetadata(_Frozen):
-    """Human-facing description. Tags are open strings, not a procedure enum.
-
-    The kernel does not know CABG from cath. Search tags may say either;
-    binding happens on ``PortSpec``, not on these fields.
-    """
+    """Human-facing metadata; tags remain open search terms."""
 
     title: NonEmpty
     modality: NonEmpty
@@ -57,11 +74,7 @@ class TaskMetadata(_Frozen):
 
 
 class PortSpec(_Frozen):
-    """I/O contract this task requires. The finite extension point.
-
-    ``prediction`` is an open slug the *task author* names (next-step,
-    outcome, mask, …). It is not a closed medical vocabulary.
-    """
+    """Deprecated v0.2 port retained only as a compatibility input."""
 
     id: PortId
     observation: str = ""
@@ -71,30 +84,21 @@ class PortSpec(_Frozen):
     @model_validator(mode="after")
     def _video_predict_names_a_schema(self) -> Self:
         if self.id is PortId.VIDEO_PREDICT and not self.prediction:
-            msg = (
-                "a video-predict port must name prediction — the field schema "
-                "the task author brought, not a procedure we enumerated"
-            )
-            raise TaskContractError(msg)
+            raise TaskContractError("a video-predict port must name prediction")
         return self
 
 
 class SubjectSpec(_Frozen):
-    """Who the trial scores."""
-
     kind: SubjectKind
 
 
 class PhiSpec(_Frozen):
-    """Isolation class of the world."""
-
     class_: PhiClass = Field(alias="class")
-
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
 
 class WorldSpec(_Frozen):
-    """The procedural world. Harbor's Dockerfile analogue."""
+    """Pinned procedural world and its task-owned inputs."""
 
     kind: WorldKind
     gym_id: str = ""
@@ -102,48 +106,36 @@ class WorldSpec(_Frozen):
     parameters: dict[str, bool | int | float | str] = Field(default_factory=dict)
     n_eval_episodes: Annotated[int, Field(ge=1, le=10_000)] = 30
     seed_policy: str = "deterministic-eval-30"
-    #: Relative to the task directory. Inputs visible to a video-predict agent.
     inputs_path: str = ""
-    #: Relative to the task directory. video-predict labels the task author brought.
     labels_path: str = ""
-    #: Relative to the task directory. AngioStress-shaped contract JSON.
     contract_path: str = ""
 
     @model_validator(mode="after")
-    def _gym_worlds_name_an_id(self) -> Self:
+    def _required_paths(self) -> Self:
         if self.kind in {WorldKind.LUMEN_GYM, WorldKind.GYM} and not self.gym_id:
-            msg = f"a {self.kind.value} world must name gym_id"
-            raise TaskContractError(msg)
+            raise TaskContractError(f"a {self.kind.value} world must name gym_id")
         if self.kind is WorldKind.ANGIOSTRESS_CONTRACT and not self.contract_path:
-            msg = "an angiostress-contract world must name contract_path"
-            raise TaskContractError(msg)
+            raise TaskContractError("an angiostress-contract world must name contract_path")
         return self
 
 
 class AgentSpec(_Frozen):
-    """Which agent kinds this task accepts."""
-
-    kinds: tuple[AgentKind, ...]
+    kinds: tuple[Slug, ...]
     action_space: str = ""
     timeout_sec: Annotated[float, Field(gt=0.0)] = 120.0
 
     @model_validator(mode="after")
     def _at_least_one_kind(self) -> Self:
         if not self.kinds:
-            msg = "a task must accept at least one agent kind"
-            raise TaskContractError(msg)
+            raise TaskContractError("a task must accept at least one agent kind")
         return self
 
 
 class OracleSpec(_Frozen):
-    """Where ground truth comes from."""
-
     kind: OracleKind
 
 
 class GateSpec(_Frozen):
-    """One hard gate the verifier will report."""
-
     id: Slug
     source: str = ""
     fail_when: str = ""
@@ -151,15 +143,23 @@ class GateSpec(_Frozen):
 
 
 class MetricSpec(_Frozen):
-    """One metric the verifier will report. Not a gate."""
+    """Typed metric declaration with kind-specific aggregation metadata."""
 
     id: Slug
     source: str = ""
+    kind: MetricKind = MetricKind.CONTINUOUS
+    unit: str = ""
+    direction: MetricDirection = MetricDirection.NEUTRAL
+    categories: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def _categorical_has_categories(self) -> Self:
+        if self.kind is MetricKind.CATEGORICAL and not self.categories:
+            raise TaskContractError(f"categorical metric {self.id} must declare categories")
+        return self
 
 
 class VerifierSpec(_Frozen):
-    """Vector verifier. Headline is required and must be a metric id."""
-
     abstain_ok: bool
     headline: Slug
     gates: tuple[GateSpec, ...] = ()
@@ -167,46 +167,62 @@ class VerifierSpec(_Frozen):
     entrypoint: str = ""
 
     @model_validator(mode="after")
-    def _headline_is_a_metric(self) -> Self:
-        metric_ids = [m.id for m in self.metrics]
+    def _shape(self) -> Self:
+        metric_ids = [metric.id for metric in self.metrics]
+        gate_ids = [gate.id for gate in self.gates]
         if len(set(metric_ids)) != len(metric_ids):
-            msg = "verifier metrics must have unique ids"
-            raise TaskContractError(msg)
-        gate_ids = [g.id for g in self.gates]
+            raise TaskContractError("verifier metrics must have unique ids")
         if len(set(gate_ids)) != len(gate_ids):
-            msg = "verifier gates must have unique ids"
-            raise TaskContractError(msg)
+            raise TaskContractError("verifier gates must have unique ids")
         if self.headline not in metric_ids:
-            msg = (
-                f"headline {self.headline!r} is not a declared metric; the "
-                f"headline must be one of the vector's metrics, not a gate "
-                f"and not an implicit scalar"
+            raise TaskContractError(
+                f"headline {self.headline!r} is not a declared metric; "
+                "the headline cannot be an implicit scalar"
             )
-            raise TaskContractError(msg)
         return self
 
 
 class AttestationSpec(_Frozen):
-    """Whether this task mints de-id attestations."""
-
     level: AttestationLevel = AttestationLevel.NONE
 
 
 class DecisionSpec(_Frozen):
-    """Human-subject determinations. Refused on the eval wedge."""
-
     emit_human_determination: bool = False
 
 
 class ProjectionSpec(_Frozen):
-    """Optional RL collapse. Lives beside the vector, never instead of it."""
+    """Versioned declarative projection recomputed from an authoritative vector."""
 
-    id: ProjectionId
+    id: ProjectionId | Slug
     version: Annotated[str, StringConstraints(min_length=1, max_length=32)] = "0"
+    source_metric: Slug = "raw_success"
+    require_false_metrics: tuple[Slug, ...] = ("diverged",)
+    gate_failure: GateProjectionPolicy = GateProjectionPolicy.ZERO
+    gate_unassessable: GateProjectionPolicy = GateProjectionPolicy.REFUSE
+    true_value: float = 1.0
+    false_value: float = 0.0
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def _known_projection_id(cls, value: Any) -> Any:
+        try:
+            return ProjectionId(value)
+        except ValueError:
+            return value
+
+    @property
+    def rule_digest(self) -> str:
+        payload = json.dumps(self.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(payload.encode()).hexdigest()
+
+    @property
+    def identity(self) -> str:
+        projection_id = self.id.value if isinstance(self.id, ProjectionId) else self.id
+        return f"{projection_id}@{self.version}+{self.rule_digest}"
 
 
 class TaskSpec(_Frozen):
-    """A loadable eval task."""
+    """Canonical task model; v0.2 port packages normalize before validation."""
 
     format_version: Annotated[str, StringConstraints(min_length=1, max_length=16)]
     id: Slug
@@ -215,7 +231,11 @@ class TaskSpec(_Frozen):
     subject: SubjectSpec
     phi: PhiSpec
     environment: WorldSpec
-    port: PortSpec
+    interface: InterfaceSpec
+    harness: HarnessSpec
+    scenarios: tuple[ScenarioSpec, ...] = ()
+    perturbations: tuple[PerturbationSpec, ...] = ()
+    port: PortSpec | None = None
     agent: AgentSpec
     oracle: OracleSpec
     verifier: VerifierSpec
@@ -224,127 +244,141 @@ class TaskSpec(_Frozen):
     instruction: Instruction
     projection: ProjectionSpec | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_v02(cls, raw: Any) -> Any:
+        if not isinstance(raw, dict):
+            return raw
+        data = dict(raw)
+        port = data.get("port")
+        if "interface" not in data:
+            if not isinstance(port, dict):
+                raise TaskContractError("task requires interface or legacy port")
+            data["interface"] = legacy_interface(port).model_dump(mode="json")
+        if "harness" not in data:
+            interface = InterfaceSpec.model_validate(data["interface"])
+            data["harness"] = {"interaction_mode": interface.interaction_mode.value}
+        verifier = data.get("verifier")
+        if isinstance(verifier, dict):
+            normalized_verifier = dict(verifier)
+            metrics = []
+            for raw_metric in normalized_verifier.get("metrics", []):
+                metric = dict(raw_metric)
+                if "kind" not in metric:
+                    metric["kind"] = (
+                        MetricKind.BOOLEAN.value
+                        if str(metric.get("id")) in _BOOLEAN_METRICS
+                        else MetricKind.CONTINUOUS.value
+                    )
+                metrics.append(metric)
+            normalized_verifier["metrics"] = metrics
+            data["verifier"] = normalized_verifier
+        return data
+
     @model_validator(mode="after")
     def _invariants(self) -> Self:
+        if self.harness.interaction_mode is not self.interface.interaction_mode:
+            raise TaskContractError("harness interaction mode must match the task interface")
+        scenario_ids = [scenario.id for scenario in self.scenarios]
+        if len(set(scenario_ids)) != len(scenario_ids):
+            raise TaskContractError(f"task {self.id} has duplicate scenario ids")
+        perturbation_ids = [perturbation.id for perturbation in self.perturbations]
+        if len(set(perturbation_ids)) != len(perturbation_ids):
+            raise TaskContractError(f"task {self.id} has duplicate perturbation ids")
+        unknown_scenarios = {
+            perturbation.scenario_id
+            for perturbation in self.perturbations
+            if perturbation.scenario_id is not None and perturbation.scenario_id not in scenario_ids
+        }
+        if unknown_scenarios:
+            raise TaskContractError(
+                f"task {self.id} perturbations reference unknown scenarios "
+                f"{sorted(unknown_scenarios)}"
+            )
+        if self.interface.interaction_mode is InteractionMode.CLOSED_LOOP:
+            scenario_seeds = [scenario.seed for scenario in self.scenarios]
+            if len(set(scenario_seeds)) != len(scenario_seeds):
+                raise TaskContractError(
+                    f"closed-loop task {self.id} maps more than one scenario to a seed"
+                )
+        if any(
+            perturbation.at_step is not None and perturbation.at_step >= self.harness.max_steps
+            for perturbation in self.perturbations
+        ):
+            raise TaskContractError(
+                f"task {self.id} schedules a perturbation outside harness max_steps"
+            )
         if self.phi.class_ is PhiClass.PROHIBITED:
-            msg = f"task {self.id} is marked phi=prohibited and cannot be loaded"
-            raise TaskContractError(msg)
+            raise TaskContractError(f"task {self.id} is marked phi=prohibited and cannot load")
         if self.phi.class_ is PhiClass.PROCEDURAL and (
             self.attestation.level is not AttestationLevel.NONE
         ):
-            msg = (
-                f"task {self.id} is procedural geometry; dressing it in "
-                f"attestation language is how a sim eval pretends to be a "
-                f"clinical release"
+            raise TaskContractError("procedural geometry cannot mint a clinical attestation")
+        if self.decision.emit_human_determination or self.subject.kind is SubjectKind.HUMAN:
+            raise TaskContractError(
+                "subject.kind=human and human determinations are outside this eval framework"
             )
-            raise TaskContractError(msg)
-        if self.decision.emit_human_determination:
-            msg = (
-                f"task {self.id} asks to emit a human determination; BUILD.md "
-                f"P0 refuses that path until PLAN.md Phase 0 clears, including "
-                f"when subject.kind is human"
-            )
-            raise TaskContractError(msg)
-        if self.subject.kind is SubjectKind.HUMAN:
-            msg = (
-                f"task {self.id} has subject.kind=human; the eval wedge scores "
-                f"policies and models (BUILD.md §1.3)"
-            )
-            raise TaskContractError(msg)
         if self.metadata.safety_critical and not self.verifier.gates:
-            msg = (
-                f"task {self.id} is safety_critical but declares no gates; a "
-                f"reach-only task is how raw success hides wall injury"
-            )
-            raise TaskContractError(msg)
+            raise TaskContractError(f"safety_critical task {self.id} must declare hard gates")
         if self.oracle.kind is OracleKind.PHYSICS and self.environment.kind not in {
             WorldKind.LUMEN_GYM,
             WorldKind.LUMEN_REPLAY,
             WorldKind.GYM,
         }:
-            msg = (
-                f"task {self.id} claims a physics oracle but world kind is "
-                f"{self.environment.kind.value}"
+            raise TaskContractError("a physics oracle requires a gym or replay world")
+        if self.interface.interaction_mode is InteractionMode.CLOSED_LOOP and (
+            self.environment.kind
+            not in {WorldKind.LUMEN_GYM, WorldKind.LUMEN_REPLAY, WorldKind.GYM}
+        ):
+            raise TaskContractError(
+                f"{self.interface.id} closed-loop tasks require a gym or replay world"
             )
-            raise TaskContractError(msg)
-        if self.port.id is PortId.GYM_POLICY and self.environment.kind not in {
-            WorldKind.LUMEN_GYM,
-            WorldKind.LUMEN_REPLAY,
-            WorldKind.GYM,
-        }:
-            msg = f"task {self.id} is gym-policy but world kind is {self.environment.kind.value}"
-            raise TaskContractError(msg)
-        if self.port.id is PortId.VIDEO_PREDICT and self.environment.kind not in {
-            WorldKind.FRAME_SOURCE,
-            WorldKind.ANGIOSTRESS_CONTRACT,
-            WorldKind.LUMEN_REPLAY,
-        }:
-            msg = (
-                f"task {self.id} is video-predict but world kind is "
-                f"{self.environment.kind.value}; predict tasks score media "
-                f"against labels, they do not step a gym"
-            )
-            raise TaskContractError(msg)
-        metric_ids = {m.id for m in self.verifier.metrics}
+        if self.interface.interaction_mode is InteractionMode.COUNTERFACTUAL and (
+            self.environment.kind is not WorldKind.COUNTERFACTUAL
+        ):
+            raise TaskContractError("counterfactual interfaces require a counterfactual world")
+        metric_ids = {metric.id for metric in self.verifier.metrics}
         if "safe_success" in metric_ids and self.verifier.headline == "raw_success":
-            msg = (
-                f"task {self.id} declares safe_success but headlines raw_success; "
-                f"that is the CathSim failure mode BUILD.md forbids"
+            raise TaskContractError(
+                "CathSim failure mode: safe_success cannot be hidden behind raw_success"
             )
-            raise TaskContractError(msg)
         return self
 
     def assert_runnable(self) -> None:
-        """Raise unless the world is pinned enough to replay.
-
-        Validate-only tasks (no pin yet) are loadable. They are not runnable.
-        """
-        if (
-            self.environment.kind in {WorldKind.LUMEN_GYM, WorldKind.GYM}
-            and not self.environment.world_pin
+        if self.environment.kind in {WorldKind.LUMEN_GYM, WorldKind.GYM} and not (
+            self.environment.world_pin
         ):
-            msg = (
-                f"task {self.id} has no world_pin; a published row must pin the "
-                f"sim so it can replay (BUILD.md §1.3)"
-            )
-            raise TaskContractError(msg)
+            raise TaskContractError(f"task {self.id} has no world_pin")
         if not self.verifier.entrypoint:
-            msg = (
-                f"task {self.id} has no verifier entrypoint; runnable tasks must "
-                f"bring executable vector scoring"
-            )
-            raise TaskContractError(msg)
-        if self.port.id is PortId.VIDEO_PREDICT and not self.environment.inputs_path:
-            msg = (
-                f"task {self.id} is video-predict but has no inputs_path; "
-                f"agents must never receive labels as inputs"
-            )
-            raise TaskContractError(msg)
-        if self.port.id is PortId.VIDEO_PREDICT and not self.environment.labels_path:
-            msg = (
-                f"task {self.id} is video-predict but has no labels_path; "
-                f"the oracle is the labels the task author brought"
-            )
-            raise TaskContractError(msg)
+            raise TaskContractError(f"task {self.id} has no verifier entrypoint")
+        if self.interface.interaction_mode is not InteractionMode.CLOSED_LOOP:
+            if not self.environment.inputs_path:
+                raise TaskContractError(f"task {self.id} has no inputs_path")
+            if not self.environment.labels_path:
+                raise TaskContractError(f"task {self.id} has no labels_path")
+
+    def metric(self, metric_id: str) -> MetricSpec:
+        metric = next((item for item in self.verifier.metrics if item.id == metric_id), None)
+        if metric is None:
+            raise TaskContractError(f"task {self.id} does not declare metric {metric_id}")
+        return metric
 
     def describe(self) -> str:
-        """One block for ``or-audit tasks describe``."""
-        pin = self.environment.world_pin or "(unpinned — not runnable)"
-        projection = (
-            f"{self.projection.id.value}@{self.projection.version}" if self.projection else "none"
-        )
-        gates = ", ".join(g.id for g in self.verifier.gates) or "(none)"
-        metrics = ", ".join(m.id for m in self.verifier.metrics)
+        pin = self.environment.world_pin or "(unpinned)"
+        projection = self.projection.identity if self.projection else "none"
+        gates = ", ".join(gate.id for gate in self.verifier.gates) or "(none)"
+        metrics = ", ".join(metric.id for metric in self.verifier.metrics)
         return (
             f"Task {self.id}@{self.task_version} ({self.metadata.title})\n"
-            f"  port       {self.port.id.value}\n"
-            f"  world      {self.environment.kind.value} {self.environment.gym_id} pin={pin}\n"
-            f"  subject    {self.subject.kind.value}  phi={self.phi.class_.value}\n"
+            f"  interface  {self.interface.id} ({self.harness.interaction_mode.value})\n"
+            f"  port       {self.port.id.value if self.port else self.interface.id}\n"
+            f"  world      {self.environment.kind.value} pin={pin}\n"
+            f"  subject    {self.subject.kind.value}  phi={self.phi.class_.value}"
+            "  human det. refused\n"
             f"  oracle     {self.oracle.kind.value}\n"
-            f"  agents     {', '.join(k.value for k in self.agent.kinds)}\n"
+            f"  agents     {', '.join(self.agent.kinds)}\n"
             f"  gates      {gates}\n"
             f"  metrics    {metrics}\n"
             f"  headline   {self.verifier.headline}\n"
-            f"  projection {projection}\n"
-            f"  human det. refused"
+            f"  projection {projection}"
         )

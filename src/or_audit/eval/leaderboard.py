@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import html
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from statistics import fmean
 from typing import Any
 
 from or_audit.errors import TaskContractError
@@ -19,6 +19,7 @@ from or_audit.eval.job import (
 )
 from or_audit.eval.loader import load_task
 from or_audit.eval.reconstitute import assert_trajectory_matches_vector
+from or_audit.eval.scorecard import scorecard_data
 
 
 def _result_paths(paths: list[Path]) -> list[Path]:
@@ -37,13 +38,29 @@ def _result_paths(paths: list[Path]) -> list[Path]:
     return sorted(found)
 
 
-def _metric_summary(result: JobResult) -> dict[str, float]:
-    values: dict[str, list[float]] = {}
-    for trial in result.trials:
-        for metric in trial.vector.metrics:
-            if metric.value is not None:
-                values.setdefault(metric.id, []).append(float(metric.value))
-    return {metric_id: fmean(samples) for metric_id, samples in sorted(values.items())}
+def _metric_summary(result: JobResult) -> dict[str, dict[str, Any]]:
+    return {
+        metric["id"]: {key: value for key, value in metric.items() if key != "id"}
+        for metric in scorecard_data(result)["metrics"]
+    }
+
+
+def _metric_value(metric: Mapping[str, Any]) -> float | None:
+    if metric["kind"] == "boolean":
+        return metric.get("rate")
+    if metric["kind"] == "continuous":
+        return metric.get("mean")
+    return None
+
+
+def _metric_display(metric: Mapping[str, Any]) -> str:
+    value = _metric_value(metric)
+    if value is not None:
+        unit = f" {metric['unit']}" if metric.get("unit") else ""
+        return f"{value:.4g}{unit}"
+    if metric["kind"] == "categorical":
+        return ", ".join(f"{category}: {count}" for category, count in metric["counts"].items())
+    return "—"
 
 
 def _verified_result(job_dir: Path) -> JobResult:
@@ -81,6 +98,8 @@ def leaderboard_data(paths: list[Path]) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     for job_dir in _result_paths(paths):
         result = _verified_result(job_dir)
+        metrics = _metric_summary(result)
+        headline = metrics[result.headline]
         assessed = result.headline_true + result.headline_false
         rows.append(
             {
@@ -90,38 +109,53 @@ def leaderboard_data(paths: list[Path]) -> dict[str, Any]:
                 "world_pin": result.world_pin,
                 "n": result.n,
                 "headline": result.headline,
+                "headline_kind": headline["kind"],
+                "headline_direction": headline["direction"],
+                "headline_value": _metric_value(headline),
                 "headline_true": result.headline_true,
                 "headline_false": result.headline_false,
                 "headline_unassessable": result.headline_unassessable,
-                "headline_rate": result.headline_true / assessed if assessed else None,
+                "headline_rate": (
+                    result.headline_true / assessed
+                    if headline["kind"] == "boolean" and assessed
+                    else None
+                ),
                 "any_gate_failed": result.any_gate_failed,
-                "metrics": _metric_summary(result),
+                "metrics": metrics,
                 "head": result.head,
             }
         )
-    rows.sort(
-        key=lambda row: (
+
+    def sort_key(row: dict[str, Any]) -> tuple[Any, ...]:
+        value = row["headline_value"]
+        ordered = value is not None and row["headline_direction"] != "neutral"
+        direction_value = -value if ordered and row["headline_direction"] == "maximize" else value
+        return (
             row["task_id"],
-            -(row["headline_rate"] if row["headline_rate"] is not None else -1.0),
             row["any_gate_failed"],
+            not ordered,
+            direction_value if direction_value is not None else 0.0,
             row["agent_identity"],
         )
-    )
-    return {"format_version": "1", "rows": rows}
+
+    rows.sort(key=sort_key)
+    return {"format_version": "2", "rows": rows}
 
 
 def render_html(data: dict[str, Any]) -> str:
     """Render a dependency-free static table without collapsing the vector."""
     body: list[str] = []
     for row in data["rows"]:
-        rate = "—" if row["headline_rate"] is None else f"{100 * row['headline_rate']:.1f}%"
-        metrics = ", ".join(f"{key}={value:.4g}" for key, value in row["metrics"].items())
+        headline = _metric_display(row["metrics"][row["headline"]])
+        metrics = ", ".join(
+            f"{key}={_metric_display(value)}" for key, value in row["metrics"].items()
+        )
         cells = (
             row["task_id"],
             row["agent_identity"],
             row["world_pin"] or "—",
             str(row["n"]),
-            f"{row['headline']} {rate}",
+            f"{row['headline']} {headline}",
             str(row["headline_unassessable"]),
             str(row["any_gate_failed"]),
             metrics,
@@ -144,8 +178,9 @@ td:last-child{{font:12px ui-monospace,monospace;overflow-wrap:anywhere}}
 tr:nth-child(even){{background:#fafbfc}}
 </style>
 <h1>OR-Audit safety-vector leaderboard</h1>
-<p>Ranked within each task by headline rate. Safety gates, abstentions, metrics, pins,
-and artifact heads remain visible; there is no cross-task overall score.</p>
+<p>Ranked within each task by fewer hard-gate failures, then by the declared direction
+of an ordered headline. Categorical headlines remain unranked. The complete metric vector,
+pins, and artifact heads remain visible; there is no cross-task overall score.</p>
 <table><thead><tr>
 <th>Task</th><th>Agent</th><th>World pin</th><th>n</th><th>Headline</th>
 <th>Unassessable</th><th>Gate failures</th><th>Metrics</th><th>Artifact head</th>

@@ -1,4 +1,4 @@
-format_version = "1"
+format_version = "2"
 id = "video-nextstep"
 task_version = "0"
 
@@ -6,8 +6,7 @@ task_version = "0"
 title = "Next-step / outcome prediction on held-out procedural video"
 modality = "procedural-video"
 # Tags are search, not a kernel taxonomy. A CABG corpus, a cath corpus, or
-# anything else is the same port. The task author names the procedure here
-# if they want; the harness does not switch on it.
+# anything else uses the same interface. Procedure names remain task-owned.
 tags = ["video", "next-step", "outcome"]
 safety_critical = true
 
@@ -24,11 +23,18 @@ seed_policy = "held-out-split"
 inputs_path = "inputs.json"
 labels_path = "labels.json"
 
-[port]
+[interface]
 id = "video-predict"
-observation = "video-clip"
-# Open slug: the label schema travels with the dataset, not in this kernel.
-prediction = "next-step"
+interaction_mode = "single-turn"
+protocol_version = "1"
+observations = ["video-clip"]
+outputs = ["next-step"]
+features = ["reasoning", "abstention"]
+
+[harness]
+interaction_mode = "single-turn"
+protocol_version = "1"
+max_steps = 1
 
 [agent]
 kinds = ["frozen-model", "vlm"]
@@ -47,12 +53,18 @@ id = "unsafe_prediction"
 
 [[verifier.metrics]]
 id = "next_step_correct"
+kind = "boolean"
+direction = "maximize"
 
 [[verifier.metrics]]
 id = "outcome_correct"
+kind = "boolean"
+direction = "maximize"
 
 [[verifier.metrics]]
 id = "abstained"
+kind = "boolean"
+direction = "neutral"
 
 [attestation]
 level = "none"

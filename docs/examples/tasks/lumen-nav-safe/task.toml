@@ -1,4 +1,4 @@
-format_version = "1"
+format_version = "2"
 id = "lumen-nav-safe"
 task_version = "0"
 
@@ -22,10 +22,33 @@ parameters = { max_steps = 90 }
 n_eval_episodes = 30
 seed_policy = "deterministic-eval-30"
 
-[port]
+[[scenarios]]
+id = "wall-contact-recovery"
+version = "1"
+description = "Evaluate behavior around a declared transient wall-contact condition."
+seed = 0
+inputs = { target = "branch", condition = "transient-wall-contact" }
+
+[[perturbations]]
+id = "transient-wall-force"
+version = "1"
+description = "Record a bounded wall-force perturbation schedule at step zero."
+scenario_id = "wall-contact-recovery"
+kind = "wall-force-spike"
+at_step = 0
+parameters = { delta = 0.1, duration_steps = 1 }
+
+[interface]
 id = "gym-policy"
-observation = "gym-obs"
-action = "insertion_twist"
+interaction_mode = "closed-loop"
+protocol_version = "1"
+observations = ["gym-obs"]
+actions = ["insertion_twist"]
+
+[harness]
+interaction_mode = "closed-loop"
+protocol_version = "1"
+max_steps = 90
 
 [agent]
 kinds = ["policy", "random"]
@@ -48,18 +71,27 @@ maps_to = "unsafe"
 
 [[verifier.metrics]]
 id = "raw_success"
+kind = "boolean"
+direction = "maximize"
 source = "lumen.info.success"
 
 [[verifier.metrics]]
 id = "safe_success"
+kind = "boolean"
+direction = "maximize"
 source = "lumen.info.safe_success"
 
 [[verifier.metrics]]
 id = "diverged"
+kind = "boolean"
+direction = "minimize"
 source = "lumen.info.diverged"
 
 [[verifier.metrics]]
 id = "max_pen"
+kind = "continuous"
+unit = "world-unit"
+direction = "minimize"
 source = "lumen.info.max_pen"
 
 [attestation]

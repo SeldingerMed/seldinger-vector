@@ -1,16 +1,15 @@
-"""Export a job of vectors as jsonl of versioned projection floats for RL.
+"""Export vector jobs as task-declared, versioned projection records for RL.
 
-The leaderboard still reads the vector. Training may only see a closed
-projection. Homemade floats are refused: ``--projection`` is a
-:class:`~or_audit.eval.enums.ProjectionId`, and each row is recomputed from
-the stored vector rather than trusted from ``projection.json``.
+The vector remains authoritative. Each row carries the declarative projection
+rule and digest and is recomputed from the stored vector; stored or caller-made
+floats are never trusted.
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -37,16 +36,27 @@ class RlExportRecord(BaseModel):
     episode_id: str
     projection_id: str
     projection_version: str
+    projection_digest: str
+    projection_rule: dict[str, Any]
     projection: float
 
 
-def _spec_for_task(task: TaskSpec, projection_id: ProjectionId) -> ProjectionSpec:
+def _spec_for_task(task: TaskSpec, projection_id: ProjectionId | str) -> ProjectionSpec:
+    requested = projection_id.value if isinstance(projection_id, ProjectionId) else projection_id
     if task.projection is None:
-        return ProjectionSpec(id=projection_id, version="0")
-    return ProjectionSpec(id=projection_id, version=task.projection.version)
+        raise TaskContractError(
+            f"task {task.id} has no declared projection or diverged gating rule"
+        )
+    if task.projection.id != requested:
+        raise TaskContractError(
+            f"task {task.id} declares {task.projection.id!r}, not {requested!r}"
+        )
+    return task.projection
 
 
-def export_job_records(job_dir: Path, *, projection_id: ProjectionId) -> tuple[RlExportRecord, ...]:
+def export_job_records(
+    job_dir: Path, *, projection_id: ProjectionId | str
+) -> tuple[RlExportRecord, ...]:
     """Recompute one job's trials into RL records."""
     config = read_job_config(job_dir)
     result = read_job_result(job_dir)
@@ -61,7 +71,7 @@ def export_job_records(job_dir: Path, *, projection_id: ProjectionId) -> tuple[R
         if trial.projection is not None and trial.projection != recomputed:
             msg = (
                 f"{job_dir.name} seed {trial.seed}: stored projection "
-                f"{trial.projection} disagrees with {spec.id.value}={recomputed}; "
+                f"{trial.projection} disagrees with {spec.identity}={recomputed}; "
                 f"export-rl recomputes from the vector and will not ship a "
                 f"homemade float"
             )
@@ -74,8 +84,10 @@ def export_job_records(job_dir: Path, *, projection_id: ProjectionId) -> tuple[R
                 world_pin=result.world_pin,
                 seed=trial.seed,
                 episode_id=f"{result.task_id}-{trial.seed}",
-                projection_id=spec.id.value,
+                projection_id=spec.id,
                 projection_version=spec.version,
+                projection_digest=spec.rule_digest,
+                projection_rule=spec.model_dump(mode="json"),
                 projection=recomputed,
             )
         )
@@ -85,7 +97,7 @@ def export_job_records(job_dir: Path, *, projection_id: ProjectionId) -> tuple[R
 def export_rl(
     path: Path,
     *,
-    projection_id: ProjectionId,
+    projection_id: ProjectionId | str,
     out: Path,
 ) -> int:
     """Write jsonl for a job directory or a cartesian parent. Returns episode count."""

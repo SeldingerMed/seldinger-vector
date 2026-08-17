@@ -1,0 +1,1 @@
+Given a pinned procedural state and candidate interventions, rank the interventions by predicted consequence and select one action. Return the selected intervention, the full ranking, a short predicted consequence, and calibrated uncertainty. The task-owned verifier evaluates the selection against held-out safety and recovery evidence that is never sent to the agent.

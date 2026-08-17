@@ -1,8 +1,19 @@
-format_version = "1"
+format_version = "2"
 id = "seldingermed/lumen-linear"
 agent_version = "0"
-port = "gym-policy"
 kind = "policy"
 weights_pin = "a000e3af8b0e38db910907f794c962d1277605753c04b75d1aa4cf8b88c58ba0"
 weights_path = "weights.json"
+
+[[capabilities]]
+interface = "gym-policy"
+interaction_modes = ["closed-loop"]
+protocol_versions = ["1"]
+observations = ["gym-obs"]
+actions = ["insertion_twist"]
+
+[runtime]
+kind = "local"
+protocol_version = "1"
 entrypoint = "policy.py:load_policy"
+timeout_sec = 120.0
