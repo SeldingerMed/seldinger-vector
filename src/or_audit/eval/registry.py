@@ -18,6 +18,8 @@ from or_audit.eval.integrity import tree_digest
 DEFAULT_REGISTRY = (
     "https://raw.githubusercontent.com/SeldingerMed/seldinger-tasks/main/registry.json"
 )
+REGISTRY_CACHE_ROOT = Path.home() / ".cache" / "vector" / "registry"
+LEGACY_REGISTRY_CACHE_ROOT = Path.home() / ".cache" / "or-audit" / "registry"
 RegistryId = Annotated[
     str,
     StringConstraints(
@@ -179,13 +181,20 @@ def _checkout(entry: RegistryEntry, cache_root: Path) -> Path:
     return checkout
 
 
+def _registry_cache_root() -> Path:
+    """Return the active registry checkout cache, honoring a legacy path when present."""
+    if REGISTRY_CACHE_ROOT.is_dir() or not LEGACY_REGISTRY_CACHE_ROOT.is_dir():
+        return REGISTRY_CACHE_ROOT
+    return LEGACY_REGISTRY_CACHE_ROOT
+
+
 def materialize_entry(
     entry: RegistryEntry,
     *,
     cache_root: Path | None = None,
 ) -> Path:
     """Resolve and content-verify one immutable package directory."""
-    root = _checkout(entry, cache_root or Path.home() / ".cache" / "or-audit" / "registry")
+    root = _checkout(entry, cache_root or _registry_cache_root())
     package = (root / entry.path).resolve()
     try:
         package.relative_to(root.resolve())
