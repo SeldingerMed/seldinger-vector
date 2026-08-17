@@ -363,11 +363,21 @@ def _leaderboard_build(args: argparse.Namespace) -> int:
     return 0
 
 
-def build_parser() -> argparse.ArgumentParser:
+def _cli_prog() -> str:
+    """Return the installed command name for help output."""
+    if not sys.argv:
+        return "vector"
+    stem = Path(sys.argv[0]).stem
+    if stem in {"vector", "or-audit"}:
+        return stem
+    return "vector"
+
+
+def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     """Build the argument parser."""
     parser = argparse.ArgumentParser(
-        prog="or-audit",
-        description="Eval harness for procedural medical AI (Harbor analog). "
+        prog=prog or _cli_prog(),
+        description="Vector evaluation harness for procedural medical AI. "
         "Also still runs the synthetic credentialing demo.",
     )
     parser.add_argument("--version", action="version", version=PACKAGE_VERSION)

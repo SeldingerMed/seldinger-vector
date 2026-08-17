@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Final
 
-#: Version of the OR-Audit package as a whole.
+#: Version of the Vector package as a whole.
 PACKAGE_VERSION: Final = "0.3.0a0"
 
 #: Version of the domain and record schema. Carried on every persisted audit

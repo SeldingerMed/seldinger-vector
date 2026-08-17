@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#ff5a1f">
-  <meta name="description" content="Run procedural AI models against versioned tasks and ship replayable evaluation artifacts with OR-Audit.">
+  <meta name="description" content="Run procedural AI models against versioned tasks and ship replayable evaluation artifacts with Vector.">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="OR-Audit | Put your model under a real test">
+  <meta property="og:title" content="Vector | Put your model under a real test">
   <meta property="og:description" content="Package the model. Bind the task. Execute every trial. Replay the exact result.">
   <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="OR-Audit">
+  <meta name="twitter:title" content="Vector">
   <meta name="twitter:description" content="The evaluation layer for procedural AI.">
-  <title>OR-Audit | The evaluation layer for procedural AI</title>
+  <title>Vector | The evaluation layer for procedural AI</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
   <script src="/app.js" defer></script>
@@ -27,20 +27,20 @@
   </div>
 
   <header class="site-header">
-    <a class="brand" href="#top" aria-label="OR-Audit home">
+    <a class="brand" href="#top" aria-label="Vector home">
       <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
         <circle class="brand-orbit" cx="20" cy="20" r="16"></circle>
         <path d="M20 4v32M4 20h32"></path>
         <circle class="brand-core" cx="20" cy="20" r="4"></circle>
       </svg>
-      <span>OR/AUDIT</span>
+      <span>VECTOR</span>
     </a>
     <nav aria-label="Primary navigation">
       <a href="#system">How it runs</a>
       <a href="#example">Example</a>
       <a href="#artifact">Output</a>
     </nav>
-    <a class="header-action" href="https://github.com/SeldingerMed/or-audit">View source <span aria-hidden="true">↗</span></a>
+    <a class="header-action" href="https://github.com/SeldingerMed/seldinger-vector">View source <span aria-hidden="true">↗</span></a>
   </header>
 
   <main id="main">
@@ -49,16 +49,16 @@
       <div class="hero-copy">
         <p class="eyebrow hero-eyebrow">Evaluation infrastructure for procedural AI</p>
         <h1 id="hero-title"><span>Your model.</span><span class="hero-accent">Under a real test.</span></h1>
-        <p class="hero-deck">Package any procedural model. Bind it to a versioned task. OR-Audit executes every trial and ships the result as a replayable evidence bundle.</p>
+        <p class="hero-deck">Package any procedural model. Bind it to a versioned task. Vector executes every trial and ships the result as a replayable evidence bundle.</p>
         <div class="hero-actions">
-          <a class="button button-dark" href="https://github.com/SeldingerMed/or-audit#development">Run OR-Audit <span aria-hidden="true">→</span></a>
+          <a class="button button-dark" href="https://github.com/SeldingerMed/seldinger-vector#development">Run Vector <span aria-hidden="true">→</span></a>
           <a class="button button-line" href="#example">Inspect a complete run</a>
         </div>
       </div>
 
       <figure class="engine-figure" aria-label="A task and agent bind, execute, and produce a vector artifact">
         <svg class="engine-map" viewBox="0 0 760 620" role="img" aria-labelledby="engine-title engine-desc">
-          <title id="engine-title">OR-Audit execution map</title>
+          <title id="engine-title">Vector execution map</title>
           <desc id="engine-desc">Versioned task and agent packages flow into the evaluation core, then produce trial vectors and a replayable artifact.</desc>
           <defs>
             <filter id="soft-glow" x="-80%" y="-80%" width="260%" height="260%">
@@ -99,7 +99,7 @@
         </svg>
         <div class="map-label label-task"><small>INPUT 01</small><strong>VERSIONED TASK</strong><code>org/task@version</code></div>
         <div class="map-label label-agent"><small>INPUT 02</small><strong>MODEL PACKAGE</strong><code>org/agent@version</code></div>
-        <div class="map-label label-core"><small>OR/AUDIT</small><strong>BIND + EXECUTE</strong></div>
+        <div class="map-label label-core"><small>VECTOR</small><strong>BIND + EXECUTE</strong></div>
         <div class="map-label label-output"><small>OUTPUT</small><strong>VECTOR ARTIFACT</strong><code>sha256:…</code></div>
         <div class="engine-readout" aria-hidden="true">
           <span><i></i> port compatible</span>
@@ -112,7 +112,7 @@
         <div class="bench-head"><span>RUN A PINNED PUBLIC EVALUATION</span><span>PYTHON 3.11+</span></div>
         <div class="command-line">
           <span class="prompt" aria-hidden="true">$</span>
-          <code id="run-command">uvx --from git+https://github.com/SeldingerMed/or-audit.git@5f384e5874ee6769d48ca2d12cb1162cfb00d768 or-audit run -d seldingermed/video-nextstep@0 -a example/video-predictor@0 --out ./runs/video-nextstep</code>
+          <code id="run-command">uvx --from git+https://github.com/SeldingerMed/seldinger-vector.git@f82b4b6de11379f0b1ceac40a753de6fdeecd0d6 vector run -d seldingermed/video-nextstep@0 -a example/video-predictor@0 --out ./runs/video-nextstep</code>
           <button class="copy-button" type="button" data-copy-target="run-command" aria-describedby="copy-status"><span class="copy-label">Copy command</span></button>
         </div>
         <p class="copy-status" id="copy-status" aria-live="polite"></p>
@@ -130,7 +130,7 @@
       <div class="section-heading" data-reveal>
         <p class="eyebrow">The execution path</p>
         <h2 id="system-title">From model package to inspectable result.</h2>
-        <p>OR-Audit gives task authors control of the test and model teams a stable interface to run it. The kernel handles the contract between them.</p>
+        <p>Vector gives task authors control of the test and model teams a stable interface to run it. The kernel handles the contract between them.</p>
       </div>
 
       <ol class="system-steps">
@@ -152,7 +152,7 @@
         <li data-reveal>
           <span class="step-number">04</span>
           <div><h3>Replay the result</h3><p>Hand the complete bundle to another team. They can reconstruct the run and match its artifact head.</p></div>
-          <code>or-audit replay</code>
+          <code>vector replay</code>
         </li>
       </ol>
     </section>
@@ -162,10 +162,10 @@
         <p class="eyebrow">One run, complete evidence</p>
         <h2 id="artifact-title">A result you can open, replay, and hand off.</h2>
         <p>Each job carries the task package, model package, configuration, per-trial vectors, trajectory, scorecard, and a content-derived head. The evidence moves with the result.</p>
-        <a class="inline-link" href="https://github.com/SeldingerMed/or-audit/blob/main/docs/BUILD.md">Read the artifact contract <span aria-hidden="true">↗</span></a>
+        <a class="inline-link" href="https://github.com/SeldingerMed/seldinger-vector/blob/main/docs/BUILD.md">Read the artifact contract <span aria-hidden="true">↗</span></a>
       </div>
 
-      <div class="artifact-stage" data-reveal aria-label="Layers inside an OR-Audit result bundle">
+      <div class="artifact-stage" data-reveal aria-label="Layers inside a Vector result bundle">
         <div class="artifact-orbit orbit-one" aria-hidden="true"></div>
         <div class="artifact-orbit orbit-two" aria-hidden="true"></div>
         <div class="artifact-sheet sheet-back" aria-hidden="true"><span>BUNDLE / PACKAGES</span></div>
@@ -214,7 +214,7 @@
       </div>
 
       <div class="evidence-links" data-reveal aria-label="Example source links">
-        <a href="https://github.com/SeldingerMed/or-audit"><span>01</span><strong>Open the product</strong><small>SeldingerMed/or-audit ↗</small></a>
+        <a href="https://github.com/SeldingerMed/seldinger-vector"><span>01</span><strong>Open the product</strong><small>SeldingerMed/seldinger-vector ↗</small></a>
         <a href="https://github.com/SeldingerMed/seldinger-tasks/tree/main/datasets/seldingermed/video-nextstep/0"><span>02</span><strong>Open the task</strong><small>inputs + labels + verifier ↗</small></a>
         <a href="https://github.com/SeldingerMed/seldinger-tasks/tree/main/agents/example/video-predictor/0"><span>03</span><strong>Open the agent</strong><small>package + predictions ↗</small></a>
         <a href="https://github.com/SeldingerMed/seldinger-tasks/blob/main/site/leaderboard.json"><span>04</span><strong>Open the published run</strong><small>vector + pins + artifact head ↗</small></a>
@@ -225,21 +225,21 @@
       <div class="cta-scan" aria-hidden="true"></div>
       <p class="eyebrow">Ship the test with the model</p>
       <h2 id="cta-title">Your next claim starts with a run.</h2>
-      <p>Bring a versioned task or a packaged agent. OR-Audit turns the pairing into evidence another team can inspect and replay.</p>
+      <p>Bring a versioned task or a packaged agent. Vector turns the pairing into evidence another team can inspect and replay.</p>
       <div class="cta-actions">
-        <a class="button button-orange" href="https://github.com/SeldingerMed/or-audit#development">Run your first evaluation <span aria-hidden="true">→</span></a>
+        <a class="button button-orange" href="https://github.com/SeldingerMed/seldinger-vector#development">Run your first evaluation <span aria-hidden="true">→</span></a>
         <a class="button button-dark-line" href="https://github.com/SeldingerMed/seldinger-tasks">Browse public packages <span aria-hidden="true">↗</span></a>
       </div>
     </section>
   </main>
 
   <footer>
-    <a class="brand footer-brand" href="#top"><span>OR/AUDIT</span></a>
+    <a class="brand footer-brand" href="#top"><span>VECTOR</span></a>
     <p>Evaluation infrastructure for procedural AI.</p>
     <div>
-      <a href="https://github.com/SeldingerMed/or-audit">Source</a>
+      <a href="https://github.com/SeldingerMed/seldinger-vector">Source</a>
       <a href="https://github.com/SeldingerMed/seldinger-tasks">Registry</a>
-      <a href="https://github.com/SeldingerMed/or-audit/blob/main/docs/BUILD.md">Contract</a>
+      <a href="https://github.com/SeldingerMed/seldinger-vector/blob/main/docs/BUILD.md">Contract</a>
     </div>
   </footer>
 </body>

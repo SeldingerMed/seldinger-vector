@@ -1,7 +1,7 @@
 [project]
-name = "or-audit"
+name = "vector"
 version = "0.3.0a0"
-description = "Independent evaluation infrastructure for procedural medical AI"
+description = "Vector — independent evaluation infrastructure for procedural medical AI"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
@@ -12,6 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
+vector = "or_audit.cli:main"
 or-audit = "or_audit.cli:main"
 
 [project.optional-dependencies]
