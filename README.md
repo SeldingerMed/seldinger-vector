@@ -89,6 +89,27 @@ uv run vector run -s docs/examples/tasksets/counterfactual-recovery-v1 \
 
 `datasets` and `-d/--dataset` remain input aliases for v0.2 automation during migration.
 
+## Public registry
+
+Published tasksets and agents live in [`SeldingerMed/seldinger-tasks`](https://github.com/SeldingerMed/seldinger-tasks). Vector loads `registry.json` from that repo by default; packages are pinned by git ref and content digest.
+
+```bash
+# List published packages (HTTPS index only)
+uv run vector tasksets list
+uv run vector agents list
+
+# Pull a verified package into a local directory
+uv run vector agents pull example/video-predictor@0 --out ./packages
+
+# Run against registry references without cloning the harness repo
+uv run vector run -d seldingermed/video-nextstep@0 \
+  -a example/video-predictor@0 \
+  --out ./runs/video-nextstep
+uv run vector replay ./runs/video-nextstep
+```
+
+Override the index with `--registry` (local path, `file://` path, or HTTPS URL). Checkouts cache under `~/.cache/vector/registry`.
+
 ## Artifacts
 
 Each job contains:
