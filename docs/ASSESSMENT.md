@@ -114,7 +114,7 @@ A straw man is useful when it is the argument a sophisticated outsider will actu
 
 ### 2.3 Against the company, independent of product shape
 
-Seldinger is nascent. Public repos are research artifacts (Lumen, AngioStress, GaugeFlow, failure-mode preprints). `or-audit` is private, eight commits, UNLICENSED, pre-Phase-0. The steel-man below does not get to skip this. A kernel can be right and still be too early, too narrow, or too expensive to be a company.
+Seldinger is nascent. Public repos are research artifacts (Lumen, AngioStress, GaugeFlow, failure-mode preprints). This harness is Apache-2.0 and still pre-product: a kernel can be right and still be too early, too narrow, or too expensive to be a company. The steel-man below does not get to skip this.
 
 ---
 
@@ -279,7 +279,7 @@ Match Lumen's firewall:
 - Clinical video, rater identities, named-human artifacts: private, never in this git history.
 - Field-of-use on any label license (`PLAN.md` §10) still applies if labels are sold. Selling *eval runs* is the default so labels need not leave the building.
 
-UNLICENSED is fine until R1 exists. After R1, pick a license on purpose (kernel Apache-2.0 like Lumen, or keep proprietary if the harness *is* the company). Do not accidentally contaminate Lumen with a proprietary import in the other direction.
+The harness is Apache-2.0, matching Lumen. Do not import this package into Lumen; the world and the harness version independently. Clinical video, rater identities, and named-human artifacts stay out of this git history.
 
 ### R5 — Product surfaces, in ship order
 

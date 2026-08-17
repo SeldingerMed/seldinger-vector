@@ -409,7 +409,7 @@ seldinger-tasks/                  # NEW at P4 — public dataset+agent registry 
                                   # third parties publish here or against this format
 ```
 
-License: harness may stay UNLICENSED until P4; the public tasks repo should be Apache-2.0 like Lumen so labs will actually run it. Do not import proprietary OR-Audit into Lumen.
+License: the harness is Apache-2.0, matching Lumen. The public tasks repo should also be Apache-2.0. Do not import this package into Lumen; the world and the harness version independently.
 
 ---
 

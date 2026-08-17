@@ -127,6 +127,6 @@ uv run pytest
 
 Implementation plan and migration details: [`docs/V0.3.md`](docs/V0.3.md). Product architecture and invariants: [`docs/BUILD.md`](docs/BUILD.md). Evaluation rationale: [`docs/ASSESSMENT.md`](docs/ASSESSMENT.md).
 
-## Licence
+## License
 
-UNLICENSED — proprietary to SeldingerMed. Not for distribution.
+Licensed under the Apache License, Version 2.0. See [`LICENSE`](LICENSE).
