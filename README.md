@@ -29,7 +29,7 @@ Every mode emits the same typed trace vocabulary: observations, outputs, actions
 
 ## Execution boundary
 
-Package Python does not execute in the Vector process by default. Local agents and task verifiers use a persistent JSON-lines subprocess protocol with request IDs, timeouts, malformed-output refusal, exit-status capture, and explicit process cleanup. `trusted-in-process` exists only as an explicit runtime kind for controlled test doubles. Runtime descriptors also represent pinned container, Hugging Face, and OpenAI-compatible identities; v0.3 locally executes the subprocess and trusted-test kinds.
+Package Python does not execute in the SurgEval process by default. Local agents and task verifiers use a persistent JSON-lines subprocess protocol with request IDs, timeouts, malformed-output refusal, exit-status capture, and explicit process cleanup. `trusted-in-process` exists only as an explicit runtime kind for controlled test doubles. Runtime descriptors also represent pinned container, Hugging Face, and OpenAI-compatible identities; v0.3 locally executes the subprocess and trusted-test kinds.
 
 The agent receives only task inputs or observations. Labels and other oracle evidence are passed separately to the task-owned verifier.
 
@@ -156,7 +156,7 @@ uv run mypy
 uv run pytest
 ```
 
-Implementation plan and migration details: [`docs/V0.3.md`](docs/V0.3.md). Product architecture and invariants: [`docs/BUILD.md`](docs/BUILD.md). Evaluation rationale: [`docs/ASSESSMENT.md`](docs/ASSESSMENT.md).
+Implementation plan and migration details: [`docs/V0.3.md`](docs/V0.3.md). Product architecture and invariants: [`docs/BUILD.md`](docs/BUILD.md). Evaluation rationale: [`docs/ASSESSMENT.md`](docs/ASSESSMENT.md). Dataset licensing and data usage: [`docs/DATASETS.md`](docs/DATASETS.md). Conformance and claim ledger: [`docs/CONFORMANCE.md`](docs/CONFORMANCE.md).
 
 ## License
 
