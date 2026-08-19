@@ -29,6 +29,7 @@ from or_audit.eval.contracts import (
 )
 from or_audit.eval.enums import (
     AttestationLevel,
+    GateKind,
     OracleKind,
     PhiClass,
     PortId,
@@ -140,6 +141,20 @@ class GateSpec(_Frozen):
     source: str = ""
     fail_when: str = ""
     maps_to: str = ""
+    kind: GateKind | Slug = GateKind.CUSTOM
+    threshold: float | None = None
+    unit: str = ""
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _normalize_kind(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            normalized = value.replace("_", "-").lower()
+            try:
+                return GateKind(normalized)
+            except ValueError:
+                return normalized
+        return value
 
 
 class MetricSpec(_Frozen):
@@ -320,18 +335,22 @@ class TaskSpec(_Frozen):
             )
         if self.metadata.safety_critical and not self.verifier.gates:
             raise TaskContractError(f"safety_critical task {self.id} must declare hard gates")
-        if self.oracle.kind is OracleKind.PHYSICS and self.environment.kind not in {
+        physics_worlds = {
             WorldKind.LUMEN_GYM,
             WorldKind.LUMEN_REPLAY,
             WorldKind.GYM,
-        }:
-            raise TaskContractError("a physics oracle requires a gym or replay world")
+            WorldKind.SOFA,
+            WorldKind.WARP,
+            WorldKind.ISAAC_LAB,
+            WorldKind.PYBULLET,
+        }
+        if self.oracle.kind is OracleKind.PHYSICS and self.environment.kind not in physics_worlds:
+            raise TaskContractError("a physics oracle requires a gym, sim, or replay world")
         if self.interface.interaction_mode is InteractionMode.CLOSED_LOOP and (
-            self.environment.kind
-            not in {WorldKind.LUMEN_GYM, WorldKind.LUMEN_REPLAY, WorldKind.GYM}
+            self.environment.kind not in physics_worlds
         ):
             raise TaskContractError(
-                f"{self.interface.id} closed-loop tasks require a gym or replay world"
+                f"{self.interface.id} closed-loop tasks require a gym, sim, or replay world"
             )
         if self.interface.interaction_mode is InteractionMode.COUNTERFACTUAL and (
             self.environment.kind is not WorldKind.COUNTERFACTUAL
@@ -345,9 +364,15 @@ class TaskSpec(_Frozen):
         return self
 
     def assert_runnable(self) -> None:
-        if self.environment.kind in {WorldKind.LUMEN_GYM, WorldKind.GYM} and not (
-            self.environment.world_pin
-        ):
+        physics_worlds = {
+            WorldKind.LUMEN_GYM,
+            WorldKind.GYM,
+            WorldKind.SOFA,
+            WorldKind.WARP,
+            WorldKind.ISAAC_LAB,
+            WorldKind.PYBULLET,
+        }
+        if self.environment.kind in physics_worlds and not (self.environment.world_pin):
             raise TaskContractError(f"task {self.id} has no world_pin")
         if not self.verifier.entrypoint:
             raise TaskContractError(f"task {self.id} has no verifier entrypoint")
