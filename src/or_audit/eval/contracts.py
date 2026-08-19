@@ -72,6 +72,7 @@ class InterfaceSpec(_Frozen):
     actions: tuple[Slug, ...] = ()
     outputs: tuple[Slug, ...] = ()
     features: tuple[Slug, ...] = ()
+    modalities: tuple[Slug, ...] = ()
 
     @model_validator(mode="after")
     def _shape_matches_mode(self) -> Self:
@@ -94,6 +95,7 @@ class CapabilitySpec(_Frozen):
     actions: tuple[Slug, ...] = ()
     outputs: tuple[Slug, ...] = ()
     features: tuple[Slug, ...] = ()
+    modalities: tuple[Slug, ...] = ()
     schema_wildcard: bool = False
 
     @model_validator(mode="after")
@@ -109,6 +111,7 @@ class CapabilitySpec(_Frozen):
             and set(interface.actions) <= set(self.actions)
             and set(interface.outputs) <= set(self.outputs)
             and set(interface.features) <= set(self.features)
+            and set(interface.modalities) <= set(self.modalities)
         )
         return (
             self.interface == interface.id

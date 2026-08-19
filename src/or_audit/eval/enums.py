@@ -20,6 +20,30 @@ class SubjectKind(StrEnum):
     HUMAN = "human"
 
 
+class ModalityKind(StrEnum):
+    """Procedural modality categories supported by SurgEval/Vector."""
+
+    VIDEO_LAPAROSCOPIC = "video-laparoscopic"
+    VIDEO_ENDOSCOPIC = "video-endoscopic"
+    AIRWAY_BRONCHOSCOPY = "airway-bronchoscopy"
+    FLUOROSCOPY_DSA = "fluoroscopy-dsa"
+    ORTHOPEDIC_POINTCLOUD = "orthopedic-pointcloud"
+    ROBOTIC_KINEMATICS = "robotic-kinematics"
+    ENDOVASCULAR_SIM = "endovascular-sim"
+    SYNTHETIC_PROCEDURAL = "synthetic-procedural"
+
+
+class GateKind(StrEnum):
+    """Typology of inviolable physical and procedural safety gates."""
+
+    SPATIAL_EXCLUSION = "spatial-exclusion"
+    FORCE_THRESHOLD = "force-threshold"
+    PERFORATION_RISK = "perforation-risk"
+    RADIATION_DOSE = "radiation-dose"
+    TEMPORAL_BOUND = "temporal-bound"
+    CUSTOM = "custom"
+
+
 class PhiClass(StrEnum):
     """Isolation class of the world's data."""
 
@@ -60,6 +84,12 @@ class WorldKind(StrEnum):
     ANGIOSTRESS_CONTRACT = "angiostress-contract"
     FRAME_SOURCE = "frame-source"
     COUNTERFACTUAL = "counterfactual"
+    SOFA = "sofa"
+    WARP = "warp"
+    ISAAC_LAB = "isaac-lab"
+    PYBULLET = "pybullet"
+    VIDEO_STREAM = "video-stream"
+    CT_AIRWAY = "ct-airway"
 
 
 class OracleKind(StrEnum):
