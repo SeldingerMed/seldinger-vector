@@ -1,0 +1,83 @@
+format_version = "2"
+id = "broncho-airway-nav"
+task_version = "0"
+
+[metadata]
+title = "Robotic Bronchoscopy Airway Navigation with Force Gate"
+modality = "airway-bronchoscopy"
+tags = ["bronchoscopy", "airway", "navigation", "force-gate"]
+safety_critical = true
+
+[subject]
+kind = "policy"
+
+[phi]
+class = "procedural"
+
+[environment]
+kind = "gym"
+gym_id = "Broncho/AirwayNav-v0"
+world_pin = "broncho-synthetic-v1"
+parameters = { max_steps = 100 }
+n_eval_episodes = 5
+seed_policy = "deterministic-eval-5"
+
+[interface]
+id = "broncho-steering"
+interaction_mode = "closed-loop"
+protocol_version = "1"
+observations = ["airway-em-obs"]
+actions = ["steering-cmd"]
+modalities = ["airway-bronchoscopy"]
+
+[harness]
+interaction_mode = "closed-loop"
+protocol_version = "1"
+max_steps = 100
+
+[agent]
+kinds = ["policy", "random"]
+action_space = "steering-cmd"
+timeout_sec = 60.0
+
+[oracle]
+kind = "physics"
+
+[verifier]
+abstain_ok = false
+headline = "safe_navigation"
+entrypoint = "verifier.py:load_verifier"
+
+[[verifier.gates]]
+id = "airway_wall_puncture"
+source = "info.contact_force_n"
+fail_when = "contact_force_n > 1.5"
+maps_to = "unsafe"
+kind = "force-threshold"
+threshold = 1.5
+unit = "N"
+
+[[verifier.metrics]]
+id = "safe_navigation"
+kind = "boolean"
+direction = "maximize"
+source = "info.safe_navigation"
+
+[[verifier.metrics]]
+id = "target_reached"
+kind = "boolean"
+direction = "maximize"
+source = "info.target_reached"
+
+[[verifier.metrics]]
+id = "max_contact_force_n"
+kind = "continuous"
+direction = "minimize"
+unit = "N"
+source = "info.max_contact_force_n"
+
+[[verifier.metrics]]
+id = "diverged"
+kind = "boolean"
+direction = "minimize"
+source = "info.diverged"
