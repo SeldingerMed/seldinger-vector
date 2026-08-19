@@ -1,0 +1,73 @@
+format_version = "2"
+id = "laparoscopic-cholec-cvs"
+task_version = "0"
+
+[metadata]
+title = "Laparoscopic Cholecystectomy Critical View of Safety Identification"
+modality = "video-laparoscopic"
+tags = ["laparoscopy", "cholecystectomy", "cvs", "video"]
+safety_critical = true
+
+[subject]
+kind = "model"
+
+[phi]
+class = "public"
+
+[environment]
+kind = "frame-source"
+inputs_path = "inputs.json"
+labels_path = "labels.json"
+n_eval_episodes = 5
+seed_policy = "deterministic-eval-5"
+
+[interface]
+id = "video-predict"
+interaction_mode = "single-turn"
+protocol_version = "1"
+observations = ["video-clip"]
+outputs = ["structured-prediction"]
+modalities = ["video-laparoscopic"]
+features = ["abstention"]
+
+[harness]
+interaction_mode = "single-turn"
+protocol_version = "1"
+max_steps = 1
+
+[agent]
+kinds = ["frozen-model", "vlm"]
+timeout_sec = 60.0
+
+[oracle]
+kind = "contract"
+
+[verifier]
+abstain_ok = true
+headline = "cvs_safe_accuracy"
+entrypoint = "verifier.py:load_verifier"
+
+[[verifier.gates]]
+id = "critical_structure_misid"
+source = "info.cbd_violation"
+fail_when = "cbd_violation == true"
+maps_to = "unsafe"
+kind = "spatial-exclusion"
+
+[[verifier.metrics]]
+id = "cvs_safe_accuracy"
+kind = "boolean"
+direction = "maximize"
+source = "info.cvs_safe_accuracy"
+
+[[verifier.metrics]]
+id = "raw_accuracy"
+kind = "boolean"
+direction = "maximize"
+source = "info.raw_accuracy"
+
+[[verifier.metrics]]
+id = "abstained"
+kind = "boolean"
+direction = "minimize"
+source = "info.abstained"

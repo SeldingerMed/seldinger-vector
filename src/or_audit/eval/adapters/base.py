@@ -5,6 +5,7 @@ orthopedic kinematics) defines an adapter that normalizes observations,
 validates actions, and extracts domain-specific safety telemetry.
 """
 
+from collections.abc import Callable
 from typing import Any, Protocol, runtime_checkable
 
 from or_audit.errors import TaskContractError
@@ -85,16 +86,17 @@ class ModalityAdapter:
         }
 
 
-_ADAPTER_REGISTRY: dict[str, type[BaseModalityAdapter] | BaseModalityAdapter] = {}
+_AdapterEntry = type[BaseModalityAdapter] | BaseModalityAdapter | Callable[..., BaseModalityAdapter]
+_ADAPTER_REGISTRY: dict[str, _AdapterEntry] = {}
 
 
 def register_adapter(
     modality: ModalityKind | str,
-    adapter: type[BaseModalityAdapter] | BaseModalityAdapter,
+    adapter: _AdapterEntry,
     *,
     override: bool = False,
 ) -> None:
-    """Register an adapter class or instance for a given modality."""
+    """Register an adapter class, instance, or factory for a given modality."""
     key = modality.value if isinstance(modality, ModalityKind) else str(modality)
     if key in _ADAPTER_REGISTRY and not override:
         raise TaskContractError(f"modality adapter already registered for {key!r}")
@@ -107,7 +109,7 @@ def get_adapter(modality: ModalityKind | str, **kwargs: Any) -> BaseModalityAdap
     entry = _ADAPTER_REGISTRY.get(key)
     if entry is None:
         return None
-    if isinstance(entry, type):
+    if callable(entry):
         return entry(**kwargs)
     return entry
 
@@ -124,12 +126,46 @@ def require_adapter(modality: ModalityKind | str, **kwargs: Any) -> BaseModality
 
 def list_adapters() -> dict[str, str]:
     """Return dictionary of registered modalities and their adapter class names."""
-    return {
-        k: v.__name__ if isinstance(v, type) else v.__class__.__name__
-        for k, v in sorted(_ADAPTER_REGISTRY.items())
-    }
+    result = {}
+    for k, v in sorted(_ADAPTER_REGISTRY.items()):
+        if isinstance(v, type):
+            result[k] = v.__name__
+        elif callable(v):
+            result[k] = getattr(v, "__name__", "factory")
+        else:
+            result[k] = v.__class__.__name__
+    return result
 
 
 def clear_registry() -> None:
     """Reset the adapter registry (primarily for test isolation)."""
     _ADAPTER_REGISTRY.clear()
+
+
+def reset_default_adapters() -> None:
+    """Reset and re-populate the adapter registry with default built-in adapters."""
+    _ADAPTER_REGISTRY.clear()
+    from or_audit.eval.adapters.endoluminal import EndoluminalAdapter
+    from or_audit.eval.adapters.fluoroscopy import FluoroscopyAdapter
+    from or_audit.eval.adapters.kinematics import KinematicsAdapter
+    from or_audit.eval.adapters.video import VideoAdapter
+
+    register_adapter(ModalityKind.VIDEO_LAPAROSCOPIC, VideoAdapter, override=True)
+    register_adapter(
+        ModalityKind.VIDEO_ENDOSCOPIC,
+        lambda **kw: VideoAdapter(ModalityKind.VIDEO_ENDOSCOPIC, **kw),
+        override=True,
+    )
+    register_adapter(ModalityKind.AIRWAY_BRONCHOSCOPY, EndoluminalAdapter, override=True)
+    register_adapter(ModalityKind.FLUOROSCOPY_DSA, FluoroscopyAdapter, override=True)
+    register_adapter(
+        ModalityKind.ENDOVASCULAR_SIM,
+        lambda **kw: FluoroscopyAdapter(ModalityKind.ENDOVASCULAR_SIM, **kw),
+        override=True,
+    )
+    register_adapter(ModalityKind.ROBOTIC_KINEMATICS, KinematicsAdapter, override=True)
+    register_adapter(
+        ModalityKind.ORTHOPEDIC_POINTCLOUD,
+        lambda **kw: KinematicsAdapter(ModalityKind.ORTHOPEDIC_POINTCLOUD, **kw),
+        override=True,
+    )
