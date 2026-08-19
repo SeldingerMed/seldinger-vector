@@ -18,8 +18,8 @@ from or_audit.eval.integrity import tree_digest
 DEFAULT_REGISTRY = (
     "https://raw.githubusercontent.com/SeldingerMed/seldinger-tasks/main/registry.json"
 )
-REGISTRY_CACHE_ROOT = Path.home() / ".cache" / "vector" / "registry"
-LEGACY_REGISTRY_CACHE_ROOT = Path.home() / ".cache" / "or-audit" / "registry"
+REGISTRY_CACHE_ROOT = Path.home() / ".cache" / "surgeval" / "registry"
+LEGACY_REGISTRY_CACHE_ROOT = Path.home() / ".cache" / "vector" / "registry"
 RegistryId = Annotated[
     str,
     StringConstraints(

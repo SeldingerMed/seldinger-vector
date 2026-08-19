@@ -30,15 +30,15 @@ def test_default_registry_resolves_video_nextstep() -> None:
     assert entry.repository.endswith("seldinger-tasks.git")
 
 
-def test_registry_cache_root_prefers_vector_path(
+def test_registry_cache_root_prefers_surgeval_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    vector_cache = tmp_path / "vector" / "registry"
+    surgeval_cache = tmp_path / "surgeval" / "registry"
     legacy_cache = tmp_path / "legacy" / "registry"
-    monkeypatch.setattr("or_audit.eval.registry.REGISTRY_CACHE_ROOT", vector_cache)
+    monkeypatch.setattr("or_audit.eval.registry.REGISTRY_CACHE_ROOT", surgeval_cache)
     monkeypatch.setattr("or_audit.eval.registry.LEGACY_REGISTRY_CACHE_ROOT", legacy_cache)
-    assert _registry_cache_root() == vector_cache
+    assert _registry_cache_root() == surgeval_cache
 
     legacy_cache.mkdir(parents=True)
     assert _registry_cache_root() == legacy_cache

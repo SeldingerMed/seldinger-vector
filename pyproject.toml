@@ -1,7 +1,7 @@
 [project]
-name = "vector"
+name = "surgeval"
 version = "0.3.0a0"
-description = "Vector — independent evaluation infrastructure for procedural medical AI"
+description = "SurgEval — independent evaluation infrastructure for procedural medical AI"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
@@ -14,8 +14,6 @@ dependencies = [
 
 [project.scripts]
 surgeval = "or_audit.cli:main"
-vector = "or_audit.cli:main"
-or-audit = "or_audit.cli:main"
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",

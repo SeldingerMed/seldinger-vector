@@ -1,10 +1,10 @@
-# Vector
+# SurgEval
 
 Independent evaluation infrastructure for procedural medical AI.
 
-Vector binds versioned task interfaces to declared agent capabilities, executes agents and task-owned verifiers in separate processes, and writes replayable vector evidence. The v0.3 kernel supports closed-loop policies, multi-turn interactive agents, structured single-turn models, and counterfactual world models without adding procedure-specific runner branches.
+SurgEval binds versioned task interfaces to declared agent capabilities, executes agents and task-owned verifiers in separate processes, and writes replayable vector evidence. The v0.3 kernel supports closed-loop policies, multi-turn interactive agents, structured single-turn models, and counterfactual world models without adding procedure-specific runner branches.
 
-Install the CLI as `vector`. The `or-audit` entry point remains as a one-release alias.
+Install the CLI as `surgeval`. The `vector` and `or-audit` entry points remain as one-release aliases.
 
 ## Core model
 
@@ -55,33 +55,33 @@ uv venv --python 3.13
 uv pip install -e ".[dev]"
 
 # Closed-loop Lumen policy
-uv run vector bind docs/examples/tasks/lumen-nav-safe \
+uv run surgeval bind docs/examples/tasks/lumen-nav-safe \
   docs/examples/agents/seldingermed-lumen-linear
-uv run vector run -t docs/examples/tasks/lumen-nav-safe \
+uv run surgeval run -t docs/examples/tasks/lumen-nav-safe \
   -a docs/examples/agents/seldingermed-lumen-linear -n 3 \
   --out /tmp/vector-lumen
 
 # Procedural-video structured prediction with abstention
-uv run vector run -t docs/examples/tasks/video-nextstep \
+uv run surgeval run -t docs/examples/tasks/video-nextstep \
   -a docs/examples/agents/example-video-predictor \
   --out /tmp/vector-video
 
 # Laparoscopic CVS identification through the video modality adapter
-uv run vector bind docs/examples/tasks/laparoscopic-cholec-cvs \
+uv run surgeval bind docs/examples/tasks/laparoscopic-cholec-cvs \
   docs/examples/agents/example-cvs-detector
-uv run vector run -t docs/examples/tasks/laparoscopic-cholec-cvs \
+uv run surgeval run -t docs/examples/tasks/laparoscopic-cholec-cvs \
   -a docs/examples/agents/example-cvs-detector \
   --out /tmp/vector-cvs
-uv run vector replay /tmp/vector-cvs
+uv run surgeval replay /tmp/vector-cvs
 
 # Counterfactual world-model consequence ranking
-uv run vector bind docs/examples/tasks/counterfactual-recovery \
+uv run surgeval bind docs/examples/tasks/counterfactual-recovery \
   docs/examples/agents/example-counterfactual-world-model
-uv run vector run -t docs/examples/tasks/counterfactual-recovery \
+uv run surgeval run -t docs/examples/tasks/counterfactual-recovery \
   -a docs/examples/agents/example-counterfactual-world-model \
   --out /tmp/vector-counterfactual
-uv run vector replay /tmp/vector-counterfactual
-uv run vector export-rl /tmp/vector-counterfactual \
+uv run surgeval replay /tmp/vector-counterfactual
+uv run surgeval export-rl /tmp/vector-counterfactual \
   --projection gated-recovery-v1 \
   --out /tmp/vector-counterfactual/rollouts.jsonl
 ```
@@ -89,8 +89,8 @@ uv run vector export-rl /tmp/vector-counterfactual \
 Tasksets use the canonical v0.3 verb:
 
 ```bash
-uv run vector tasksets validate docs/examples/tasksets/counterfactual-recovery-v1
-uv run vector run -s docs/examples/tasksets/counterfactual-recovery-v1 \
+uv run surgeval tasksets validate docs/examples/tasksets/counterfactual-recovery-v1
+uv run surgeval run -s docs/examples/tasksets/counterfactual-recovery-v1 \
   -a docs/examples/agents/example-counterfactual-world-model \
   --out /tmp/vector-taskset
 ```
@@ -103,20 +103,20 @@ Published tasksets and agents live in [`SeldingerMed/seldinger-tasks`](https://g
 
 ```bash
 # List published packages (HTTPS index only)
-uv run vector tasksets list
-uv run vector agents list
+uv run surgeval tasksets list
+uv run surgeval agents list
 
 # Pull a verified package into a local directory
-uv run vector agents pull example/video-predictor@0 --out ./packages
+uv run surgeval agents pull example/video-predictor@0 --out ./packages
 
 # Run against registry references without cloning the harness repo
-uv run vector run -d seldingermed/video-nextstep@0 \
+uv run surgeval run -d seldingermed/video-nextstep@0 \
   -a example/video-predictor@0 \
   --out ./runs/video-nextstep
-uv run vector replay ./runs/video-nextstep
+uv run surgeval replay ./runs/video-nextstep
 ```
 
-Override the index with `--registry` (local path, `file://` path, or HTTPS URL). Checkouts cache under `~/.cache/vector/registry`.
+Override the index with `--registry` (local path, `file://` path, or HTTPS URL). Checkouts cache under `~/.cache/surgeval/registry`.
 
 ## Artifacts
 
