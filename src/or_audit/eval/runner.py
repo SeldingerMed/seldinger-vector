@@ -10,7 +10,7 @@ from or_audit.audit.canonical import digest
 from or_audit.errors import TaskContractError
 from or_audit.eval.agent import AgentPackage
 from or_audit.eval.bind import assert_bind
-from or_audit.eval.contracts import InteractionMode, legacy_capability
+from or_audit.eval.contracts import CapabilitySpec, InteractionMode
 from or_audit.eval.enums import AgentKind, PortId, WorldKind
 from or_audit.eval.gym_world import GymFactory, make_gym, run_gym_episode, sample_action
 from or_audit.eval.integrity import tree_digest
@@ -32,6 +32,7 @@ from or_audit.eval.plugins import (
 )
 from or_audit.eval.predict import index_items, load_claim_footer, load_items
 from or_audit.eval.reconstitute import assert_trajectory_matches_vector
+from or_audit.eval.sim import get_simulation_engine
 from or_audit.eval.task import TaskSpec
 from or_audit.eval.trace import ProceduralTrace
 from or_audit.eval.vector import project
@@ -46,14 +47,19 @@ def _close(runtime: object | None) -> None:
         close()
 
 
-def builtin_random_agent() -> AgentPackage:
+def builtin_random_agent(interface_id: str = "gym-policy") -> AgentPackage:
+    capability = CapabilitySpec(
+        interface=interface_id,
+        interaction_modes=(InteractionMode.CLOSED_LOOP,),
+        schema_wildcard=True,
+    )
     return AgentPackage(
         format_version="1",
         id="seldingermed/random",
         agent_version="0",
         port=PortId.GYM_POLICY,
         kind=AgentKind.RANDOM.value,
-        capabilities=(legacy_capability(PortId.GYM_POLICY.value),),
+        capabilities=(capability,),
     )
 
 
@@ -158,8 +164,11 @@ def _run_closed_loop(
             raise TaskContractError(f"policy agent {agent.id} has no package directory")
         policy = load_policy_runtime(agent_dir, agent.entrypoint, agent.weights_path, agent.runtime)
     verifier = load_verifier_runtime(task_dir, task.verifier.entrypoint)
-    factory: GymFactory = gym_factory or make_gym
-    env = factory(task)
+    if gym_factory is not None:
+        env = gym_factory(task)
+    else:
+        sim_engine = get_simulation_engine(task)
+        env = sim_engine if sim_engine is not None else make_gym(task)
     identity = agent_identity(agent)
     unwrapped = getattr(env, "unwrapped", env)
     nested = getattr(unwrapped, "_env", unwrapped)
@@ -258,6 +267,7 @@ def _run_closed_loop(
     finally:
         _close(policy)
         _close(verifier)
+        _close(env)
     return (
         assemble_job_result(
             task=task,
@@ -534,7 +544,7 @@ def replay_job(
         agent = load_agent(agent_dir)
     else:
         agent_dir = None
-        agent = builtin_random_agent()
+        agent = builtin_random_agent(interface_id=str(config.get("interface") or task.interface.id))
         if digest(agent.model_dump(mode="json")) != config.get("agent_digest"):
             raise TaskContractError("builtin agent digest does not match config")
     assert_trajectory_matches_vector(
