@@ -253,7 +253,12 @@ def write_job(
             )
     from or_audit.eval.scorecard import write_scorecards
 
-    write_scorecards(out, result)
+    world_engine = config.get("world_engine")
+    write_scorecards(
+        out,
+        result,
+        world_engine=world_engine if isinstance(world_engine, dict) else None,
+    )
 
 
 def read_job_result(out: Path) -> JobResult:

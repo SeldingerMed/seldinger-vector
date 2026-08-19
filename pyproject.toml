@@ -89,5 +89,19 @@ disallow_untyped_defs = false
 disallow_incomplete_defs = false
 
 [[tool.mypy.overrides]]
-module = ["lumen.*", "gymnasium.*", "torch.*"]
+module = [
+    "lumen.*",
+    "gymnasium.*",
+    "torch.*",
+    "Sofa",
+    "Sofa.*",
+    "SofaRuntime",
+    "SofaRuntime.*",
+    "sofagym",
+    "sofagym.*",
+    "warp",
+    "warp.*",
+    "isaaclab",
+    "isaaclab.*",
+]
 ignore_missing_imports = true

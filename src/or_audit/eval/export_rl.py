@@ -19,6 +19,7 @@ from or_audit.eval.enums import ProjectionId
 from or_audit.eval.integrity import tree_digest
 from or_audit.eval.job import read_job_config, read_job_result, resolve_bundle_path
 from or_audit.eval.loader import load_task
+from or_audit.eval.sim.base import BACKEND_SYNTHETIC_STUB
 from or_audit.eval.task import ProjectionSpec, TaskSpec
 from or_audit.eval.vector import project
 
@@ -54,11 +55,28 @@ def _spec_for_task(task: TaskSpec, projection_id: ProjectionId | str) -> Project
     return task.projection
 
 
+def _assert_physical_backend(job_dir: Path, config: dict[str, Any]) -> None:
+    """Refuse rewards derived from a synthetic stand-in world."""
+    world_engine = config.get("world_engine")
+    if not isinstance(world_engine, dict):
+        return
+    if world_engine.get("backend") != BACKEND_SYNTHETIC_STUB:
+        return
+    engine = str(world_engine.get("engine") or "unknown")
+    raise TaskContractError(
+        f"{job_dir.name} ran against a synthetic stand-in for the {engine} world "
+        f'(config.json world_engine.backend="{BACKEND_SYNTHETIC_STUB}"); refusing to '
+        f"export rewards from fabricated physics. Re-run the job against a real "
+        f"simulation backend, or drop environment.synthetic_stub from the task."
+    )
+
+
 def export_job_records(
     job_dir: Path, *, projection_id: ProjectionId | str
 ) -> tuple[RlExportRecord, ...]:
     """Recompute one job's trials into RL records."""
     config = read_job_config(job_dir)
+    _assert_physical_backend(job_dir, config)
     result = read_job_result(job_dir)
     task_dir = resolve_bundle_path(job_dir, config["task_dir"], label="task")
     if tree_digest(task_dir) != config.get("task_digest"):

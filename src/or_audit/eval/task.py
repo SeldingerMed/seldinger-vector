@@ -105,6 +105,13 @@ class WorldSpec(_Frozen):
     gym_id: str = ""
     world_pin: str = ""
     parameters: dict[str, bool | int | float | str] = Field(default_factory=dict)
+    synthetic_stub: bool = Field(
+        default=False,
+        description=(
+            "explicitly permit a synthetic stand-in when no real backend is attached; "
+            "artifacts are stamped and RL export is refused"
+        ),
+    )
     n_eval_episodes: Annotated[int, Field(ge=1, le=10_000)] = 30
     seed_policy: str = "deterministic-eval-30"
     inputs_path: str = ""

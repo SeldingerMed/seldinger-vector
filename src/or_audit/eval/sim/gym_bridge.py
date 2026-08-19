@@ -6,21 +6,43 @@ from typing import Any
 
 from or_audit.eval.enums import WorldKind
 from or_audit.eval.gym_world import GymEnv, make_gym
-from or_audit.eval.sim.base import BaseSimulationBridge, SimulationEngine
+from or_audit.eval.sim.base import (
+    BACKEND_REAL,
+    BaseSimulationBridge,
+    SimulationEngine,
+    module_distribution_version,
+    world_kind_key,
+)
 from or_audit.eval.task import TaskSpec
 
 
 class GymnasiumBridge(BaseSimulationBridge):
     """Bridge for standard Gymnasium, PyBullet, and Lumen environments."""
 
-    def __init__(self, env: GymEnv, *, world_kind: WorldKind | str = WorldKind.GYM) -> None:
+    def __init__(
+        self,
+        env: GymEnv,
+        *,
+        world_kind: WorldKind | str = WorldKind.GYM,
+        world_pin: str = "",
+    ) -> None:
         self.env = env
         self.world_kind = world_kind
+        self.world_pin = world_pin
 
     @property
     def unwrapped(self) -> Any:
         """Return the unwrapped base environment."""
         return getattr(self.env, "unwrapped", self.env)
+
+    def engine_provenance(self) -> dict[str, Any]:
+        """Report the wrapped environment's own distribution as the backend."""
+        return {
+            "engine": world_kind_key(self.world_kind),
+            "backend": BACKEND_REAL,
+            "backend_version": module_distribution_version(type(self.unwrapped).__module__),
+            "world_pin": self.world_pin,
+        }
 
     def reset(
         self,
@@ -63,4 +85,8 @@ class GymnasiumBridge(BaseSimulationBridge):
 def make_gym_bridge(task: TaskSpec) -> SimulationEngine:
     """Factory creating a GymnasiumBridge for a task."""
     env = make_gym(task)
-    return GymnasiumBridge(env, world_kind=task.environment.kind)
+    return GymnasiumBridge(
+        env,
+        world_kind=task.environment.kind,
+        world_pin=task.environment.world_pin,
+    )

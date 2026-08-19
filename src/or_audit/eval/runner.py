@@ -32,7 +32,7 @@ from or_audit.eval.plugins import (
 )
 from or_audit.eval.predict import index_items, load_claim_footer, load_items
 from or_audit.eval.reconstitute import assert_trajectory_matches_vector
-from or_audit.eval.sim import get_simulation_engine
+from or_audit.eval.sim import BACKEND_UNKNOWN, get_simulation_engine
 from or_audit.eval.task import TaskSpec
 from or_audit.eval.trace import ProceduralTrace
 from or_audit.eval.vector import project
@@ -45,6 +45,21 @@ def _close(runtime: object | None) -> None:
     close = getattr(runtime, "close", None)
     if callable(close):
         close()
+
+
+def _engine_provenance(task: TaskSpec, env: object | None) -> dict[str, Any]:
+    """Attest which engine produced the observations; an absent reporter is not omission."""
+    reporter = getattr(env, "engine_provenance", None)
+    if callable(reporter):
+        reported = reporter()
+        if isinstance(reported, dict):
+            return {str(key): value for key, value in reported.items()}
+    return {
+        "engine": task.environment.kind.value,
+        "backend": BACKEND_UNKNOWN,
+        "backend_version": "",
+        "world_pin": task.environment.world_pin,
+    }
 
 
 def builtin_random_agent(interface_id: str = "gym-policy") -> AgentPackage:
@@ -82,9 +97,12 @@ def run_job(
     episodes = n if n is not None else task.environment.n_eval_episodes
     if episodes < 1:
         raise TaskContractError(f"n must be >= 1, got {episodes}")
-    extra: dict[str, Any] = {"interaction_mode": task.harness.interaction_mode.value}
+    extra: dict[str, Any] = {
+        "interaction_mode": task.harness.interaction_mode.value,
+        "world_engine": _engine_provenance(task, None),
+    }
     if task.harness.interaction_mode is InteractionMode.CLOSED_LOOP:
-        result, safety = _run_closed_loop(
+        result, safety, provenance = _run_closed_loop(
             task=task,
             task_dir=task_dir,
             agent=agent,
@@ -95,6 +113,7 @@ def run_job(
             gym_factory=gym_factory,
         )
         extra["safety_max_pen"] = safety
+        extra["world_engine"] = provenance
     elif task.harness.interaction_mode is InteractionMode.SINGLE_TURN:
         result = _run_single_turn(
             task=task,
@@ -155,7 +174,7 @@ def _run_closed_loop(
     task_digest: str,
     agent_digest: str,
     gym_factory: GymFactory | None,
-) -> tuple[JobResult, float]:
+) -> tuple[JobResult, float, dict[str, Any]]:
     if agent.kind not in {AgentKind.RANDOM.value, AgentKind.POLICY.value}:
         raise TaskContractError(f"closed-loop runner does not implement kind={agent.kind}")
     policy = None
@@ -169,6 +188,7 @@ def _run_closed_loop(
     else:
         sim_engine = get_simulation_engine(task)
         env = sim_engine if sim_engine is not None else make_gym(task)
+    provenance = _engine_provenance(task, env)
     identity = agent_identity(agent)
     unwrapped = getattr(env, "unwrapped", env)
     nested = getattr(unwrapped, "_env", unwrapped)
@@ -277,6 +297,7 @@ def _run_closed_loop(
             agent_digest=agent_digest,
         ),
         safety,
+        provenance,
     )
 
 
