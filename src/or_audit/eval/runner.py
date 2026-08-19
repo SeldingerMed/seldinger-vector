@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
 
 from or_audit.audit.canonical import digest
 from or_audit.errors import TaskContractError
+from or_audit.eval.adapters import get_adapter
 from or_audit.eval.agent import AgentPackage
 from or_audit.eval.bind import assert_bind
 from or_audit.eval.contracts import CapabilitySpec, InteractionMode
@@ -39,6 +41,25 @@ from or_audit.eval.vector import project
 from or_audit.eval.verifier import score_context
 
 SAFETY_MAX_PEN = 0.3
+
+
+def _modality_adapter(task: TaskSpec) -> Any:
+    """Return an instantiated adapter for the task's declared modality, or None."""
+    if not task.interface.modalities:
+        return None
+    return get_adapter(task.interface.modalities[0])
+
+
+def _preprocess_observation(adapter: Any, item: dict[str, Any]) -> dict[str, Any]:
+    """Run an item through the modality adapter into a JSON-serializable dict."""
+    if adapter is None:
+        return item
+    processed = adapter.preprocess_observation(item)
+    if isinstance(processed, dict):
+        return processed
+    if is_dataclass(processed) and not isinstance(processed, type):
+        return asdict(processed)
+    return item
 
 
 def _close(runtime: object | None) -> None:
@@ -101,6 +122,12 @@ def run_job(
         "interaction_mode": task.harness.interaction_mode.value,
         "world_engine": _engine_provenance(task, None),
     }
+    adapter = _modality_adapter(task)
+    if adapter is not None:
+        extra["modality_adapter"] = {
+            "modality": task.interface.modalities[0],
+            "adapter": type(adapter).__name__,
+        }
     if task.harness.interaction_mode is InteractionMode.CLOSED_LOOP:
         result, safety, provenance = _run_closed_loop(
             task=task,
@@ -321,13 +348,15 @@ def _run_predictions(
     )
     verifier = load_verifier_runtime(task_dir, task.verifier.entrypoint)
     identity = agent_identity(agent)
+    adapter = _modality_adapter(task)
     trials = []
     try:
         for seed, item in enumerate(inputs[:n]):
             item_id = str(item["id"])
             if item_id not in labels:
                 raise TaskContractError(f"task {task.id} has no label for item {item_id!r}")
-            prediction = predictor.predict(item)
+            agent_input = _preprocess_observation(adapter, item)
+            prediction = predictor.predict(agent_input)
             context_kind = (
                 "counterfactual" if mode is InteractionMode.COUNTERFACTUAL else "video-predict"
             )
@@ -347,7 +376,7 @@ def _run_predictions(
             )
             trace_payload: dict[str, Any] = {
                 **context,
-                "obs": item,
+                "obs": agent_input,
                 "output": prediction,
                 "transition": {"oracle_evidence": labels[item_id]},
             }

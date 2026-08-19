@@ -66,6 +66,14 @@ uv run vector run -t docs/examples/tasks/video-nextstep \
   -a docs/examples/agents/example-video-predictor \
   --out /tmp/vector-video
 
+# Laparoscopic CVS identification through the video modality adapter
+uv run vector bind docs/examples/tasks/laparoscopic-cholec-cvs \
+  docs/examples/agents/example-cvs-detector
+uv run vector run -t docs/examples/tasks/laparoscopic-cholec-cvs \
+  -a docs/examples/agents/example-cvs-detector \
+  --out /tmp/vector-cvs
+uv run vector replay /tmp/vector-cvs
+
 # Counterfactual world-model consequence ranking
 uv run vector bind docs/examples/tasks/counterfactual-recovery \
   docs/examples/agents/example-counterfactual-world-model

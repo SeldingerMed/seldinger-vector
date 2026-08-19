@@ -1,3 +1,5 @@
+> **DRAFT — not runnable.** No paired agent or runnable world exists for this task yet. `vector bind` will refuse until a compatible agent package and simulation backend are shipped. This package is not published to the public registry.
+
 # Robotic Orthopedic Bone Resection
 
 Control the robotic burr end-effector along the planned surgical resection volume.
