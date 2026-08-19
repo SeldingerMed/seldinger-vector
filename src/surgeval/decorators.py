@@ -46,8 +46,8 @@ def agent(
                 weights_path="weights.json",
                 weights_pin="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
                 runtime=RuntimeDescriptor(
-                    kind=RuntimeKind.TRUSTED_IN_PROCESS,
-                    entrypoint="in_process",
+                    kind=RuntimeKind.LOCAL,
+                    entrypoint="runner.py:load_predictor",
                 ),
             )
 

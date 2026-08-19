@@ -128,6 +128,12 @@ def run_job(
             "modality": task.interface.modalities[0],
             "adapter": type(adapter).__name__,
         }
+    binding_cap = next(
+        (c for c in agent.capabilities if c.interface == task.interface.id and c.schema_wildcard),
+        None,
+    )
+    if binding_cap is not None:
+        extra["binding_mode"] = "wildcard"
     if task.harness.interaction_mode is InteractionMode.CLOSED_LOOP:
         result, safety, provenance = _run_closed_loop(
             task=task,

@@ -133,7 +133,7 @@ def test_to_agent_package_contract() -> None:
     assert pkg.weights_path == "weights.json"
     assert pkg.weights_pin != ""
     assert pkg.runtime is not None
-    assert pkg.runtime.kind == "trusted-in-process"
+    assert pkg.runtime.kind == "local"
 
 
 def test_gym_policy_wrapper_non_sb3() -> None:
@@ -152,3 +152,44 @@ def test_error_exports() -> None:
     assert hasattr(se, "TaskContractError")
     assert hasattr(se, "ScoreContractError")
     assert hasattr(se, "AuditChainError")
+
+
+class SdkModelA:
+    def predict(self, item: dict[str, Any]) -> dict[str, Any]:
+        del item
+        return {"cvs_achieved": True, "critical_structure": "cystic_duct"}
+
+
+class SdkModelB:
+    def predict(self, item: dict[str, Any]) -> dict[str, Any]:
+        del item
+        return {"cvs_achieved": False, "critical_structure": "common_bile_duct"}
+
+
+def test_sdk_identity_uses_real_weights_pin(tmp_path: Path) -> None:
+    """Two different models must produce different agent ids."""
+    repo_root = Path(__file__).resolve().parent.parent
+    task_dir = repo_root / "docs/examples/tasks/laparoscopic-cholec-cvs"
+
+    out_a = tmp_path / "out-a"
+    out_b = tmp_path / "out-b"
+    se.evaluate(SdkModelA(), task_dir, out=out_a, n=1)
+    se.evaluate(SdkModelB(), task_dir, out=out_b, n=1)
+
+    import json
+
+    cfg_a = json.loads((out_a / "config.json").read_text())
+    cfg_b = json.loads((out_b / "config.json").read_text())
+    assert cfg_a["agent_id"] != cfg_b["agent_id"], "different models must have different agent ids"
+    assert cfg_a["binding_mode"] == "wildcard"
+    assert cfg_b["binding_mode"] == "wildcard"
+
+
+def test_sdk_bundle_has_no_host_paths(tmp_path: Path) -> None:
+    """The generated runner.py must not embed absolute host paths."""
+    repo_root = Path(__file__).resolve().parent.parent
+    task_dir = repo_root / "docs/examples/tasks/laparoscopic-cholec-cvs"
+    out = tmp_path / "out-hostpath"
+    se.evaluate(DummyCvsModel(), task_dir, out=out, n=1)
+    runner_code = (out / "bundle" / "agent" / "runner.py").read_text()
+    assert "/Users/" not in runner_code, "runner.py must not embed absolute host paths"

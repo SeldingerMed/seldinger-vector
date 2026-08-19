@@ -6,11 +6,14 @@ across diverse modalities (laparoscopy, bronchoscopy, fluoroscopy, orthopedics).
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
-import pickle
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
+
+import cloudpickle
 
 from or_audit.eval.agent import AgentPackage
 from or_audit.eval.contracts import InteractionMode
@@ -30,29 +33,45 @@ def _synthesize_agent_bundle(
     agent_dir = target_dir / "synthesized_agent"
     agent_dir.mkdir(parents=True, exist_ok=True)
 
-    weights_path = agent_dir / "weights.json"
-    weights_path.write_text("{}", encoding="utf-8")
-    weights_pin = hashlib.sha256(b"{}").hexdigest()
+    # Force cloudpickle to serialize the class definition inline rather than
+    # by reference, so the bundle is self-contained and portable.
+    model_module_name = type(agent_obj).__module__
+    if model_module_name not in ("builtins", "__main__"):
+        model_module = sys.modules.get(model_module_name)
+        if model_module is not None:
+            with contextlib.suppress(Exception):
+                cloudpickle.register_pickle_by_value(model_module)
 
-    model_path = agent_dir / "model.pkl"
-    with open(model_path, "wb") as f:
-        pickle.dump(agent_obj, f)
+    model_bytes = cloudpickle.dumps(agent_obj)
+    weights_pin = hashlib.sha256(model_bytes).hexdigest()
+
+    (agent_dir / "model.pkl").write_bytes(model_bytes)
+
+    to_pkg = getattr(agent_obj, "to_agent_package", None)
+    if callable(to_pkg):
+        base_pkg = to_pkg(override_interface=interface_id)
+        agent_id = base_pkg.id
+        agent_version = base_pkg.agent_version
+    else:
+        agent_id = f"custom/sdk-agent-{weights_pin[:12]}"
+        agent_version = "0"
 
     entrypoint_func = (
         "load_policy" if interaction_mode is InteractionMode.CLOSED_LOOP else "load_predictor"
     )
     kind_str = "policy" if interaction_mode is InteractionMode.CLOSED_LOOP else "frozen-model"
-    cwd_str = str(Path.cwd().resolve())
-    runner_code = f'''import pickle
+    runner_code = """import os
 import sys
 from pathlib import Path
 
-for p in [r"{cwd_str}", str(Path(__file__).resolve().parent)]:
+import cloudpickle
+
+for p in [os.getcwd(), str(Path(__file__).resolve().parent)]:
     if p not in sys.path:
         sys.path.insert(0, p)
 
 with open(Path(__file__).parent / "model.pkl", "rb") as f:
-    _instance = pickle.load(f)
+    _instance = cloudpickle.load(f)
 
 class _Runtime:
     def predict(self, item):
@@ -78,15 +97,15 @@ def load_predictor(*, root=None, weights_path=None, weights=None):
 
 def load_policy(*, root=None, weights_path=None, weights=None):
     return _Runtime()
-'''
+"""
     (agent_dir / "runner.py").write_text(runner_code, encoding="utf-8")
 
     agent_toml = f"""format_version = "2"
-id = "custom/synthesized-agent"
-agent_version = "0"
+id = "{agent_id}"
+agent_version = "{agent_version}"
 kind = "{kind_str}"
 weights_pin = "{weights_pin}"
-weights_path = "weights.json"
+weights_path = "model.pkl"
 
 [[capabilities]]
 interface = "{interface_id}"

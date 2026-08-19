@@ -9,6 +9,7 @@ authors = [{ name = "SeldingerMed" }]
 dependencies = [
     "pydantic>=2.7,<3",
     "numpy>=1.26",
+    "cloudpickle>=3.0",
 ]
 
 [project.scripts]
@@ -103,5 +104,7 @@ module = [
     "warp.*",
     "isaaclab",
     "isaaclab.*",
+    "cloudpickle",
+    "cloudpickle.*",
 ]
 ignore_missing_imports = true
