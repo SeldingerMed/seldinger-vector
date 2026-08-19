@@ -1,27 +1,29 @@
-[
-  {
-    "id": "clip-001",
-    "video_uri": "s3://seldinger-data/cholec/clip-001.mp4",
-    "frame_count": 150
-  },
-  {
-    "id": "clip-002",
-    "video_uri": "s3://seldinger-data/cholec/clip-002.mp4",
-    "frame_count": 200
-  },
-  {
-    "id": "clip-003",
-    "video_uri": "s3://seldinger-data/cholec/clip-003.mp4",
-    "frame_count": 180
-  },
-  {
-    "id": "clip-004",
-    "video_uri": "s3://seldinger-data/cholec/clip-004.mp4",
-    "frame_count": 210
-  },
-  {
-    "id": "clip-005",
-    "video_uri": "s3://seldinger-data/cholec/clip-005.mp4",
-    "frame_count": 160
-  }
-]
+{
+  "items": [
+    {
+      "id": "clip-001",
+      "video_uri": "s3://seldinger-data/cholec/clip-001.mp4",
+      "frame_count": 150
+    },
+    {
+      "id": "clip-002",
+      "video_uri": "s3://seldinger-data/cholec/clip-002.mp4",
+      "frame_count": 200
+    },
+    {
+      "id": "clip-003",
+      "video_uri": "s3://seldinger-data/cholec/clip-003.mp4",
+      "frame_count": 180
+    },
+    {
+      "id": "clip-004",
+      "video_uri": "s3://seldinger-data/cholec/clip-004.mp4",
+      "frame_count": 210
+    },
+    {
+      "id": "clip-005",
+      "video_uri": "s3://seldinger-data/cholec/clip-005.mp4",
+      "frame_count": 160
+    }
+  ]
+}

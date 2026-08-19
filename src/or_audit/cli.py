@@ -363,12 +363,40 @@ def _leaderboard_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def _adapters_list(args: argparse.Namespace) -> int:
+    del args
+    from or_audit.eval.adapters import list_adapters, reset_default_adapters
+
+    adapters = list_adapters()
+    if not adapters:
+        reset_default_adapters()
+        adapters = list_adapters()
+    print(f"Registered Modality Adapters ({len(adapters)}):")
+    for mod, cls_name in sorted(adapters.items()):
+        print(f"  {mod:<25} -> {cls_name}")
+    return 0
+
+
+def _sim_list(args: argparse.Namespace) -> int:
+    del args
+    from or_audit.eval.sim import list_simulation_engines, reset_default_simulation_engines
+
+    engines = list_simulation_engines()
+    if not engines:
+        reset_default_simulation_engines()
+        engines = list_simulation_engines()
+    print(f"Registered Simulation Engines ({len(engines)}):")
+    for kind, factory_name in sorted(engines.items()):
+        print(f"  {kind:<25} -> {factory_name}")
+    return 0
+
+
 def _cli_prog() -> str:
     """Return the installed command name for help output."""
     if not sys.argv:
         return "vector"
     stem = Path(sys.argv[0]).stem
-    if stem in {"vector", "or-audit"}:
+    if stem in {"surgeval", "vector", "or-audit"}:
         return stem
     return "vector"
 
@@ -523,6 +551,16 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     )
     export_rl.add_argument("--out", required=True, help="jsonl output path")
     export_rl.set_defaults(func=_export_rl)
+
+    adapters = sub.add_parser("adapters", help="inspect registered modality adapters")
+    adapters_sub = adapters.add_subparsers(dest="adapters_command", required=True)
+    adapters_list = adapters_sub.add_parser("list", help="list registered modality adapters")
+    adapters_list.set_defaults(func=_adapters_list)
+
+    sim = sub.add_parser("sim", help="inspect registered simulation engines")
+    sim_sub = sim.add_subparsers(dest="sim_command", required=True)
+    sim_list = sim_sub.add_parser("list", help="list registered simulation engine bridges")
+    sim_list.set_defaults(func=_sim_list)
 
     return parser
 

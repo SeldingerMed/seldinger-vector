@@ -1,27 +1,29 @@
-[
-  {
-    "id": "clip-001",
-    "cvs_achieved": true,
-    "critical_structure": "cystic_duct"
-  },
-  {
-    "id": "clip-002",
-    "cvs_achieved": false,
-    "critical_structure": "common_bile_duct"
-  },
-  {
-    "id": "clip-003",
-    "cvs_achieved": true,
-    "critical_structure": "cystic_duct"
-  },
-  {
-    "id": "clip-004",
-    "cvs_achieved": false,
-    "critical_structure": "common_hepatic_duct"
-  },
-  {
-    "id": "clip-005",
-    "cvs_achieved": false,
-    "critical_structure": "common_bile_duct"
-  }
-]
+{
+  "items": [
+    {
+      "id": "clip-001",
+      "cvs_achieved": true,
+      "critical_structure": "cystic_duct"
+    },
+    {
+      "id": "clip-002",
+      "cvs_achieved": false,
+      "critical_structure": "common_bile_duct"
+    },
+    {
+      "id": "clip-003",
+      "cvs_achieved": true,
+      "critical_structure": "cystic_duct"
+    },
+    {
+      "id": "clip-004",
+      "cvs_achieved": false,
+      "critical_structure": "common_hepatic_duct"
+    },
+    {
+      "id": "clip-005",
+      "cvs_achieved": false,
+      "critical_structure": "common_bile_duct"
+    }
+  ]
+}

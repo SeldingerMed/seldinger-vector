@@ -12,9 +12,9 @@ dependencies = [
 ]
 
 [project.scripts]
+surgeval = "or_audit.cli:main"
 vector = "or_audit.cli:main"
 or-audit = "or_audit.cli:main"
-
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
@@ -34,16 +34,14 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/or_audit"]
-
+packages = ["src/or_audit", "src/surgeval"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers --strict-config"
 filterwarnings = ["error"]
 
 [tool.coverage.run]
-source = ["src/or_audit"]
-branch = true
+source = ["src/or_audit", "src/surgeval"]
 
 [tool.coverage.report]
 show_missing = true
@@ -91,5 +89,5 @@ disallow_untyped_defs = false
 disallow_incomplete_defs = false
 
 [[tool.mypy.overrides]]
-module = ["lumen.*", "gymnasium.*"]
+module = ["lumen.*", "gymnasium.*", "torch.*"]
 ignore_missing_imports = true

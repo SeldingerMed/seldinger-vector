@@ -10,6 +10,7 @@ from or_audit.eval.adapters.base import (
     list_adapters,
     register_adapter,
     require_adapter,
+    reset_default_adapters,
 )
 from or_audit.eval.adapters.endoluminal import (
     EndoluminalAction,
@@ -32,6 +33,8 @@ from or_audit.eval.adapters.video import (
     VideoToolAction,
 )
 
+reset_default_adapters()
+
 __all__ = [
     "BaseModalityAdapter",
     "CatheterGuidewireAction",
@@ -52,4 +55,5 @@ __all__ = [
     "list_adapters",
     "register_adapter",
     "require_adapter",
+    "reset_default_adapters",
 ]

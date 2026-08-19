@@ -14,6 +14,7 @@ from or_audit.eval.adapters.base import (
     list_adapters,
     register_adapter,
     require_adapter,
+    reset_default_adapters,
 )
 from or_audit.eval.contracts import CapabilitySpec, InteractionMode, InterfaceSpec
 from or_audit.eval.enums import GateKind, ModalityKind
@@ -22,9 +23,9 @@ from or_audit.eval.task import GateSpec, TaskMetadata
 
 @pytest.fixture(autouse=True)
 def _reset_registry() -> Iterator[None]:
-    clear_registry()
+    reset_default_adapters()
     yield
-    clear_registry()
+    reset_default_adapters()
 
 
 def test_modality_kind_enum_values() -> None:
@@ -122,8 +123,8 @@ class DummyBronchoAdapter(ModalityAdapter):
 
 
 def test_adapter_registry() -> None:
+    clear_registry()
     assert isinstance(DummyBronchoAdapter(), BaseModalityAdapter)
-
     register_adapter(ModalityKind.AIRWAY_BRONCHOSCOPY, DummyBronchoAdapter)
     assert "airway-bronchoscopy" in list_adapters()
 
