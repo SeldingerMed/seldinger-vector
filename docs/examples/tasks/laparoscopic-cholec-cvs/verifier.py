@@ -45,6 +45,9 @@ class CholecCvsVerifier:
                 "raw_accuracy": raw_correct,
                 "abstained": abstained,
             },
+            "signals": {
+                "cbd_violation": cbd_violation,
+            },
         }
 
 

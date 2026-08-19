@@ -7,6 +7,7 @@ from typing import Any
 
 from or_audit.domain.enums import GateStatus
 from or_audit.errors import TaskContractError
+from or_audit.eval.gate_dsl import evaluate_gate
 from or_audit.eval.plugins import VerifierRuntime, load_verifier_runtime
 from or_audit.eval.task import TaskSpec
 from or_audit.eval.vector import GateOutcome, MetricOutcome, TrialVector
@@ -53,8 +54,16 @@ def score_context(
             f"{sorted(declared_metrics)}"
         )
 
+    raw_signals = raw.get("signals")
+    signals = raw_signals if isinstance(raw_signals, dict) else {}
+
     gates = []
-    for gate_id in declared_gates:
+    for gate_spec in task.verifier.gates:
+        gate_id = gate_spec.id
+        dsl_outcome = evaluate_gate(gate_spec, signals) if signals else None
+        if dsl_outcome is not None:
+            gates.append(dsl_outcome)
+            continue
         outcome = raw_gates[gate_id]
         if not isinstance(outcome, dict):
             raise TaskContractError(f"gate {gate_id} outcome must be an object")
