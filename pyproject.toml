@@ -14,15 +14,14 @@ dependencies = [
 
 [project.scripts]
 surgeval = "or_audit.cli:main"
+vector = "or_audit.cli:main"
+or-audit = "or_audit.cli:main"
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "ruff>=0.6",
     "mypy>=1.11",
-]
-lumen = [
-    "seldinger-lumen[solver,gym] @ git+https://github.com/SeldingerMed/seldinger-lumen.git@3c6bb39ecc916c73e81131b94353ad8deee62bd4",
 ]
 
 [build-system]

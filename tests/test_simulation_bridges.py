@@ -462,3 +462,30 @@ def test_stub_job_is_stamped_and_refused_by_export_rl(tmp_path: Path) -> None:
 
     with pytest.raises(TaskContractError, match="synthetic stand-in"):
         export_job_records(out_dir, projection_id="gated_reach_v0")
+
+
+def test_export_refuses_unknown_backend(tmp_path: Path) -> None:
+    from or_audit.eval.job import JobResult, compute_head
+
+    reset_default_simulation_engines()
+    task = _sim_task(tmp_path, kind="sofa", synthetic_stub=True)
+    out_dir = tmp_path / "sofa-run"
+    run_job(
+        task=task,
+        task_dir=tmp_path / "sofa-task",
+        agent=builtin_random_agent("broncho-steering"),
+        agent_dir=None,
+        out=out_dir,
+        n=1,
+    )
+    # An environment with no reporting backend is "unknown": still unattested,
+    # so the export guard must refuse rather than treat it as physical. Flip
+    # the attested backend to unknown and re-stamp a consistent head so the
+    # provenance refusal (not a head mismatch) is what we exercise.
+    result_path = out_dir / "result.json"
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    payload["world_engine"]["backend"] = "unknown"
+    payload["head"] = compute_head(JobResult.model_validate(payload))
+    result_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    with pytest.raises(TaskContractError, match="unattested physics"):
+        export_job_records(out_dir, projection_id="gated_reach_v0")

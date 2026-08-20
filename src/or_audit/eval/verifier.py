@@ -122,6 +122,14 @@ def score_context(
         if confidence is not None:
             confidence = min(max(float(confidence), 0.0), 1.0)
         abstained = bool(outcome.get("abstained", False))
+        if abstained:
+            # Abstention is never an implicit pass/fail. A verifier that opts
+            # out yields NOT_ASSESSABLE regardless of any status it also
+            # reported; downstream reward logic must treat the gate as
+            # unassessable, never as evidence of a pass.
+            status = GateStatus.NOT_ASSESSABLE
+            if not reason:
+                reason = f"gate {gate_id} verifier abstained"
         gates.append(
             GateOutcome(
                 id=gate_id,

@@ -370,6 +370,7 @@ def _run_closed_loop(
             agent=agent,
             trials=tuple(trials),
             task_digest=task_digest,
+            world_engine=provenance,
             agent_digest=agent_digest,
         ),
         safety,
@@ -487,6 +488,7 @@ def _run_predictions(
         task_digest=task_digest,
         agent_digest=agent_digest,
         claim_footer=footer,
+        world_engine=_engine_provenance(task, None),
     )
 
 
@@ -615,6 +617,7 @@ def _run_interactive(
         task_digest=task_digest,
         agent_digest=agent_digest,
         claim_footer=footer,
+        world_engine=_engine_provenance(task, None),
     )
 
 

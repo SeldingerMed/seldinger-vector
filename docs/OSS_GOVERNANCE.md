@@ -55,8 +55,9 @@ Adding any third-party package is a review event, not a mechanical step:
 | numpy | 2.4.6 / 2.5.2 | BSD-3-Clause AND MIT AND 0BSD AND Zlib AND CC0-1.0 |
 | cloudpickle | 3.1.2 | BSD-3-Clause |
 
-(NVIDIA-hosted `warp-lang` is an optional/`lumen`-extra integration, not a
-runtime core dependency; it is not part of the shipping runtime closure.)
+(NVIDIA-hosted `warp-lang` is an optional integration installed directly from
+its own source (previously the `lumen` install extra), not a runtime core
+dependency; it is not part of the shipping runtime closure.)
 
 ## 3. IP and licensing
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
-from typing import Annotated, Any, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -32,16 +32,39 @@ class TrialRecord(BaseModel):
     projection_spec_digest: str = ""
 
 
+class WorldEngineProvenance(BaseModel):
+    """Head-covered attestation of which world/backend produced observations.
+
+    Bound into ``JobResult.world_engine`` so replay/export can attest the
+    backend from the authenticated result, never from a mutable
+    ``config.json``. ``backend`` is a closed literal over the three declared
+    states (``real`` / ``synthetic-stub`` / ``unknown``); any other value is a
+    validation error, and unknown reporter fields are rejected, so a
+    typo-ad-hoc value cannot silently pass the export provenance gate.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    engine: str
+    backend: Literal["real", "synthetic-stub", "unknown"]
+    backend_version: str = ""
+    world_pin: str = ""
+
+
 class JobResult(BaseModel):
     """Aggregated job. Never a lone mean-reward."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    format_version: str = "2"
+    format_version: str = "3"
     task_id: str
     task_version: str
     agent_identity: str
     world_pin: str
+    #: Head-covered engine provenance recorded at run time (engine, backend,
+    #: backend_version). Binding it here means export/replay can attest the
+    #: backend from the authenticated result, never from a mutable config file.
+    world_engine: WorldEngineProvenance | None = None
     interface_id: str = ""
     interaction_mode: str = ""
     runtime_identity: str = ""
@@ -88,6 +111,11 @@ def compute_head(result: JobResult) -> str:
     return digest(job_head_payload(result))
 
 
+def verify_head(result: JobResult) -> bool:
+    """Return whether ``result.head`` is the canonical head of its own payload."""
+    return compute_head(result) == result.head
+
+
 def assert_publishable(
     task: TaskSpec,
     trials: tuple[TrialRecord, ...],
@@ -119,9 +147,13 @@ def assemble_job_result(
     task_digest: str,
     agent_digest: str,
     claim_footer: str = "",
+    world_engine: dict[str, Any] | None = None,
 ) -> JobResult:
     """Build a publishable job result and stamp its head."""
     assert_publishable(task, trials, claim_footer)
+    world_engine_model: WorldEngineProvenance | None = None
+    if world_engine is not None:
+        world_engine_model = WorldEngineProvenance(**world_engine)
     headline_definition = task.metric(task.verifier.headline)
     headline_true = 0
     headline_false = 0
@@ -143,6 +175,7 @@ def assemble_job_result(
         task_version=task.task_version,
         agent_identity=agent_identity(agent),
         world_pin=task.environment.world_pin,
+        world_engine=world_engine_model,
         interface_id=task.interface.id,
         interaction_mode=task.harness.interaction_mode.value,
         runtime_identity=agent.runtime_identity,

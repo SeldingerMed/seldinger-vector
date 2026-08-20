@@ -156,6 +156,27 @@ def test_interface_stream_schema_must_be_declared() -> None:
         )
 
 
+def test_interface_interactive_streams_rejected() -> None:
+    # The interactive agent route does not apply the stream preprocessing
+    # pipeline, so an interactive interface that declares a pinned stream would
+    # bind while handing the agent a schema it did not declare. Reject the
+    # combination at bind time rather than silently diverging.
+    stream = StreamSpec(
+        id="s",
+        schema_id="obs",
+        adapter="video-laparoscopic",
+        adapter_digest="a" * 64,
+    )
+    with pytest.raises(TaskContractError, match="cannot declare streams"):
+        InterfaceSpec(
+            id="i",
+            interaction_mode=InteractionMode.INTERACTIVE,
+            observations=("obs",),
+            outputs=("out",),
+            streams=(stream,),
+        )
+
+
 def test_task_metadata_modality() -> None:
     meta = TaskMetadata(
         title="Cholecystectomy Phase Recognition",

@@ -127,6 +127,12 @@ class InterfaceSpec(_Frozen):
             raise TaskContractError(
                 f"{self.interaction_mode.value} interface {self.id} needs output"
             )
+        if self.interaction_mode is InteractionMode.INTERACTIVE and self.streams:
+            raise TaskContractError(
+                f"interactive interface {self.id} cannot declare streams: the "
+                "interactive agent route does not apply the stream/"
+                "observation-preprocessing pipeline yet"
+            )
         known_schemas = set(self.observations) | set(self.features)
         seen_ids: set[str] = set()
         for stream in self.streams:

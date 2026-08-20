@@ -22,6 +22,7 @@ Run from the repo root: ``uv run python scripts/check_identity.py [--expected-ve
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -60,25 +61,37 @@ def _main() -> int:
         errors.append(
             f"release version mismatch: package is {package_version}, expected {expected}"
         )
-    # Wheel must contain both trees.
+    # Wheel must contain both trees. Build into a fresh scratch dir so a stale
+    # wheel from a previous run can never satisfy the check, and treat a
+    # nonzero build exactly as a failure rather than inspecting leftovers.
+    smoke = root / ".dist-smoke"
+    smoke.mkdir(exist_ok=True)
+    for stale in smoke.iterdir():
+        if stale.is_dir():
+            shutil.rmtree(stale)
+        else:
+            stale.unlink()
     dist = subprocess.run(
-        ["uv", "build", "--out-dir", str(root / ".dist-smoke")],
+        ["uv", "build", "--out-dir", str(smoke)],
         cwd=root,
         capture_output=True,
         text=True,
         check=False,
     )
-    wheel = next((root / ".dist-smoke").glob("*.whl"), None)
-    if wheel is None:
+    if dist.returncode != 0:
         errors.append(f"wheel build failed: {dist.stderr[-500:]}")
     else:
-        with zipfile.ZipFile(wheel) as zf:
-            names = zf.namelist()
-        for pkg in ("or_audit", "surgeval"):
-            if not any(n.startswith(f"{pkg}/") for n in names):
-                errors.append(f"wheel missing package tree: {pkg}")
-        if sum(1 for n in names if n.startswith("or_audit/")) == 0:
-            errors.append("wheel has an empty or_audit tree")
+        wheel = next(smoke.glob("*.whl"), None)
+        if wheel is None:
+            errors.append("wheel build produced no .whl")
+        else:
+            with zipfile.ZipFile(wheel) as zf:
+                names = zf.namelist()
+            for pkg in ("or_audit", "surgeval"):
+                if not any(n.startswith(f"{pkg}/") for n in names):
+                    errors.append(f"wheel missing package tree: {pkg}")
+            if sum(1 for n in names if n.startswith("or_audit/")) == 0:
+                errors.append("wheel has an empty or_audit tree")
 
     if errors:
         print("FAIL: SurgEval identity gate", file=sys.stderr)
