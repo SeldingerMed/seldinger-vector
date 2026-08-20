@@ -28,7 +28,12 @@ interaction_mode = "closed-loop"
 protocol_version = "1"
 observations = ["airway-em-obs"]
 actions = ["steering-cmd"]
-modalities = ["airway-bronchoscopy"]
+
+[[interface.streams]]
+id = "airway-camera"
+schema_id = "airway-em-obs"
+adapter = "airway-bronchoscopy"
+adapter_digest = "8d621713470cae4f88fa90f0a8e583d76d9241458e1a680c02b2aea5e548733f"
 
 [harness]
 interaction_mode = "closed-loop"
@@ -50,12 +55,18 @@ entrypoint = "verifier.py:load_verifier"
 
 [[verifier.gates]]
 id = "airway_wall_puncture"
-source = "info.contact_force_n"
-fail_when = "contact_force_n > 1.5"
+source = "info.max_contact_force_n"
+fail_when = "max_contact_force_n > 1.5"
 maps_to = "unsafe"
 kind = "force-threshold"
 threshold = 1.5
 unit = "N"
+[verifier.gates.threshold_basis]
+value = 1.5
+unit = "N"
+citation = "Broncho airway wall contact tolerance per task safety envelope v1"
+owner = "SurgEval fixtures"
+version = "0"
 
 [[verifier.metrics]]
 id = "safe_navigation"

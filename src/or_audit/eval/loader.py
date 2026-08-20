@@ -47,6 +47,58 @@ def _load_versioned_records(root: Path, value: Any, *, label: str) -> Any:
     return records
 
 
+def _verify_calibration(root: Path, calibration: Any, *, gate: str) -> None:
+    """Verify a calibration artifact is package-contained and digest-verified."""
+    artifact = calibration.artifact
+    path = package_file(root, artifact, label=f"gate {gate} calibration artifact")
+    if not path.is_file():
+        raise TaskContractError(
+            f"gate {gate} calibration artifact {artifact} is missing from the task package"
+        )
+    actual = file_sha256(path)
+    if not _safe_eq(actual, calibration.digest):
+        raise TaskContractError(
+            f"gate {gate} calibration artifact {artifact} digest mismatch "
+            f"(declared {calibration.digest}, actual {actual})"
+        )
+
+
+def _safe_eq(a: str, b: str) -> bool:
+    # Constant-time-ish compare over equal-length hex digests.
+    if len(a) != len(b):
+        return False
+    return a == b
+
+
+def _verify_calibrations(root: Path, task: TaskSpec) -> None:
+    """Verify every declared calibration artifact at load time."""
+    for gate in task.verifier.gates:
+        if gate.calibration is not None:
+            _verify_calibration(root, gate.calibration, gate=gate.id)
+        basis = gate.threshold_basis
+        if basis is not None and basis.calibration is not None:
+            _verify_calibration(root, basis.calibration, gate=gate.id)
+
+
+def _verify_streams(task: TaskSpec) -> None:
+    """Verify every stream's adapter plugin is known and digest-pinned."""
+    from or_audit.eval.adapters import adapter_revision
+
+    for stream in task.interface.streams:
+        actual = adapter_revision(stream.adapter)
+        if actual == "":
+            raise TaskContractError(
+                f"task {task.id} stream {stream.id!r} uses unknown or unpinned "
+                f"adapter {stream.adapter!r} (no content pin available)"
+            )
+        if not _safe_eq(actual, stream.adapter_digest):
+            raise TaskContractError(
+                f"task {task.id} stream {stream.id!r} adapter {stream.adapter!r} "
+                "content digest mismatch "
+                f"(task pins {stream.adapter_digest}, registry has {actual})"
+            )
+
+
 def load_task(path: Path | str) -> TaskSpec:
     root = _task_root(Path(path))
     data = _read_toml(root / "task.toml")
@@ -64,11 +116,14 @@ def load_task(path: Path | str) -> TaskSpec:
         if "projection" in extra:
             data["projection"] = extra["projection"]
     try:
-        return TaskSpec.model_validate(data)
+        task = TaskSpec.model_validate(data)
     except TaskContractError:
         raise
     except Exception as exc:
         raise TaskContractError(f"task {root} failed validation: {exc}") from exc
+    _verify_calibrations(root, task)
+    _verify_streams(task)
+    return task
 
 
 def _taskset_paths(path: Path | str) -> tuple[Path, Path, dict[str, Any]]:

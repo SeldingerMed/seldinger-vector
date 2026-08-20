@@ -1,0 +1,42 @@
+name: SBOM
+
+# On-demand / branch SPDX SBOM generation: resolves uv.lock into an SPDX 2.3
+# JSON document, validates it against the official SPDX 2.3 JSON schema plus
+# the SurgEval structural checks, gates the license allowlist, and uploads the
+# SBOM as an artifact. The release path (Publish.yml) also generates and
+# validates the SBOM; this workflow covers ad-hoc dispatch and branch pushes.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync --all-extras
+      - name: Generate SPDX SBOM
+        run: uv run python scripts/gen_sbom.py --out sbom.spdx.json
+      - name: Validate against SPDX 2.3 schema
+        run: |
+          curl -fsSL \
+            https://raw.githubusercontent.com/spdx/spdx-spec/v2.3/schemas/spdx-schema.json \
+            -o spdx-schema.json
+          uv pip install jsonschema
+          uv run python scripts/validate_sbom.py --sbom sbom.spdx.json --schema spdx-schema.json
+      - name: License allowlist gate
+        run: uv run python scripts/check_license_allowlist.py
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: surgeval-sbom
+          path: sbom.spdx.json

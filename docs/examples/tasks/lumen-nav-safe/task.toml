@@ -65,9 +65,11 @@ entrypoint = "verifier.py:load_verifier"
 
 [[verifier.gates]]
 id = "wall_penetration"
-source = "lumen.info.max_pen"
-fail_when = "max_pen > safety_max_pen"
+inputs = { unsafe = "info.unsafe", max_pen = "info.max_pen", safety_max_pen = "safety_max_pen", diverged = "info.diverged" }
+input_defaults = { diverged = false }
+fail_when = "unsafe or max_pen > safety_max_pen or diverged"
 maps_to = "unsafe"
+realization = "scalar-dsl"
 
 [[verifier.metrics]]
 id = "raw_success"

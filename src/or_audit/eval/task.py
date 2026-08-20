@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 from typing import Annotated, Any, Self
@@ -35,6 +36,7 @@ from or_audit.eval.enums import (
     PortId,
     ProjectionId,
     SubjectKind,
+    VerifierRealizationKind,
     WorldKind,
 )
 
@@ -143,14 +145,74 @@ class OracleSpec(_Frozen):
     kind: OracleKind
 
 
+class CalibrationSpec(_Frozen):
+    """Reference to a package-relative calibration/validation artifact.
+
+    The artifact file must ship inside the task package and its byte digest
+    is verified at load time, so a learned or threshold-tuned realization
+    cannot silently tune itself on the evaluation set.
+    """
+
+    method: Slug = "fixed"
+    artifact: Annotated[str, StringConstraints(min_length=1, max_length=500)]
+    digest: Annotated[str, StringConstraints(min_length=64, max_length=64)]
+    note: str = ""
+
+
+class ThresholdBasis(_Frozen):
+    """Typed basis for a numeric safety threshold.
+
+    A safety threshold must not be an unexplained literal in ``fail_when``.
+    Where a gate declares a ``threshold``, a basis must cite a normative
+    source or reference a verified calibration artifact, so the number is
+    versioned, reviewable, and non-heuristic. ``value``/``unit`` restate the
+    threshold; ``owner``/``version`` attribute who set it and when.
+    """
+
+    value: float
+    unit: str
+    citation: str = ""
+    calibration: CalibrationSpec | None = None
+    owner: str = ""
+    version: str = ""
+
+    @model_validator(mode="after")
+    def _has_basis(self) -> Self:
+        if not self.citation and self.calibration is None:
+            raise TaskContractError(
+                "a threshold basis must cite a normative source or reference a "
+                "verified calibration artifact"
+            )
+        return self
+
+
 class GateSpec(_Frozen):
     id: Slug
+    #: Named evidence bindings for a ``scalar-dsl`` realization: signal name
+    #: -> locator resolved against the scoring context (dotted path or
+    #: ``task://`` file). Every binding is resolved and hashed by the kernel.
+    inputs: dict[str, str] = Field(default_factory=dict)
+    #: Legacy single-signal locator; folded into ``inputs`` as its leaf name.
     source: str = ""
+    #: Absent-defaults for oracle/env boolean bindings whose environment
+    #: contract defines "absent == a known value" (e.g. a divergence flag that
+    #: is authoritatively ``False`` when unset). Names must be declared inputs.
+    #: The default is kernel-digested like any real binding; absence with no
+    #: declared default still abstains (NOT_ASSESSABLE).
+    input_defaults: dict[str, bool] = Field(default_factory=dict)
     fail_when: str = ""
     maps_to: str = ""
     kind: GateKind | Slug = GateKind.CUSTOM
     threshold: float | None = None
     unit: str = ""
+    #: Declared class of evidence behind this gate (extensible: enum | slug).
+    realization: VerifierRealizationKind | Slug = VerifierRealizationKind.SCALAR_DSL
+    #: Human description of the oracle/evidence path a non-DSL gate uses.
+    provenance: str = ""
+    calibration: CalibrationSpec | None = None
+    abstain_ok: bool = True
+    #: Typed normative/calibrated basis for a numeric safety threshold.
+    threshold_basis: ThresholdBasis | None = None
 
     @field_validator("kind", mode="before")
     @classmethod
@@ -162,6 +224,94 @@ class GateSpec(_Frozen):
             except ValueError:
                 return normalized
         return value
+
+    @field_validator("realization", mode="before")
+    @classmethod
+    def _normalize_realization(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            normalized = value.replace("_", "-").lower()
+            try:
+                return VerifierRealizationKind(normalized)
+            except ValueError:
+                return normalized
+        return value
+
+    @model_validator(mode="after")
+    def _realization_contract(self) -> Self:
+        bindings = self.evidence_bindings
+        is_scalar = (
+            isinstance(self.realization, VerifierRealizationKind)
+            and self.realization is VerifierRealizationKind.SCALAR_DSL
+        )
+        if is_scalar:
+            if not self.fail_when or not bindings:
+                raise TaskContractError(
+                    f"gate {self.id}: scalar-dsl realization requires fail_when and at "
+                    "least one evidence input; opaque self-reported gates must declare "
+                    "a non-DSL realization"
+                )
+        else:
+            if not self.provenance:
+                raise TaskContractError(
+                    f"gate {self.id}: non-DSL realization {self.realization} requires "
+                    "provenance describing the oracle evidence path"
+                )
+            if not bindings:
+                raise TaskContractError(
+                    f"gate {self.id}: non-DSL realization {self.realization} requires "
+                    "declared evidence inputs the kernel resolves and hashes"
+                )
+        if (
+            isinstance(self.realization, VerifierRealizationKind)
+            and self.realization is VerifierRealizationKind.LEARNED
+            and self.calibration is None
+        ):
+            raise TaskContractError(
+                f"gate {self.id}: learned realization requires a calibration artifact"
+            )
+        unknown_defaults = set(self.input_defaults) - set(bindings)
+        if unknown_defaults:
+            raise TaskContractError(
+                f"gate {self.id}: input_defaults reference undeclared input(s) "
+                f"{sorted(unknown_defaults)}"
+            )
+        if self.threshold is not None and self.threshold_basis is None:
+            raise TaskContractError(
+                f"gate {self.id}: threshold {self.threshold} lacks a threshold_basis "
+                "(cite a normative source or reference a calibration artifact)"
+            )
+        if is_scalar and self.fail_when:
+            self._validate_fail_when_names(bindings)
+        return self
+
+    def _validate_fail_when_names(self, bindings: dict[str, str]) -> None:
+        """Reject a typo in ``fail_when`` at load time (never a silent PASS)."""
+        try:
+            tree = ast.parse(self.fail_when, mode="eval")
+        except SyntaxError as exc:
+            raise TaskContractError(
+                f"gate {self.id}: fail_when is not a valid expression: {exc}"
+            ) from exc
+        names: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                names.add(node.id)
+        keywords = {"true", "false", "null", "none"}
+        unknown = names - keywords - set(bindings)
+        if unknown:
+            raise TaskContractError(
+                f"gate {self.id}: fail_when references unknown signal(s) "
+                f"{sorted(unknown)}; must be literal keywords or declared inputs"
+            )
+
+    @property
+    def evidence_bindings(self) -> dict[str, str]:
+        """Named signal -> locator bindings, including the legacy ``source``."""
+        bindings = dict(self.inputs)
+        if self.source:
+            short = self.source.rsplit(".", 1)[-1] or self.source
+            bindings.setdefault(short, self.source)
+        return bindings
 
 
 class MetricSpec(_Frozen):

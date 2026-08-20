@@ -69,9 +69,11 @@ entrypoint = "verifier.py:load_verifier"
 
 [[verifier.gates]]
 id = "unsafe_intervention"
-source = "oracle.unsafe"
-fail_when = "selected in unsafe"
+inputs = { selected = "prediction.selected", unsafe = "label.unsafe", uncertainty = "prediction.uncertainty" }
 maps_to = "unsafe"
+realization = "counterfactual-oracle"
+provenance = "counterfactual oracle compares the selected intervention against the ground-truth unsafe set (label.unsafe) and abstains when reported uncertainty exceeds 0.5"
+abstain_ok = true
 
 [[verifier.metrics]]
 id = "correct_intervention"

@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from or_audit.eval.adapters.base import ModalityAdapter, register_adapter
+from or_audit.eval.adapters.base import ModalityAdapter
 from or_audit.eval.enums import ModalityKind
 
 
@@ -162,11 +162,3 @@ class KinematicsAdapter(ModalityAdapter):
             }
         )
         return spec
-
-
-register_adapter(ModalityKind.ROBOTIC_KINEMATICS, KinematicsAdapter, override=True)
-register_adapter(
-    ModalityKind.ORTHOPEDIC_POINTCLOUD,
-    lambda **kw: KinematicsAdapter(ModalityKind.ORTHOPEDIC_POINTCLOUD, **kw),
-    override=True,
-)

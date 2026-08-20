@@ -168,8 +168,12 @@ class TestContractRefusals:
         dest = _copy_task(tmp_path)
         _patch_toml(
             dest / "task.toml",
-            '[[verifier.gates]]\nid = "wall_penetration"\nsource = "lumen.info.max_pen"\n'
-            'fail_when = "max_pen > safety_max_pen"\nmaps_to = "unsafe"\n',
+            '[[verifier.gates]]\nid = "wall_penetration"\n'
+            'inputs = { unsafe = "info.unsafe", max_pen = "info.max_pen", '
+            'safety_max_pen = "safety_max_pen", diverged = "info.diverged" }\n'
+            "input_defaults = { diverged = false }\n"
+            'fail_when = "unsafe or max_pen > safety_max_pen or diverged"\n'
+            'maps_to = "unsafe"\nrealization = "scalar-dsl"\n',
             "",
         )
         with pytest.raises(TaskContractError, match="safety_critical"):
@@ -361,7 +365,9 @@ class TestTrialVector:
         )
 
     def test_safe_success_is_the_headline(self):
-        vector = self._vector({"success": True, "safe_success": True, "max_pen": 0.0})
+        vector = self._vector(
+            {"success": True, "safe_success": True, "unsafe": False, "max_pen": 0.0}
+        )
         assert vector.headline.id == "safe_success"
         assert vector.headline.value is True
         assert not vector.any_gate_failed
@@ -384,17 +390,23 @@ class TestTrialVector:
         assert diverged.value is True
 
     def test_float_raises(self):
-        vector = self._vector({"success": True, "safe_success": True, "max_pen": 0.0})
+        vector = self._vector(
+            {"success": True, "safe_success": True, "unsafe": False, "max_pen": 0.0}
+        )
         with pytest.raises(ScoreContractError, match="no scalar"):
             float(vector)
 
     def test_int_raises(self):
-        vector = self._vector({"success": True, "safe_success": True, "max_pen": 0.0})
+        vector = self._vector(
+            {"success": True, "safe_success": True, "unsafe": False, "max_pen": 0.0}
+        )
         with pytest.raises(ScoreContractError, match="no scalar"):
             int(vector)
 
     def test_bool_raises(self):
-        vector = self._vector({"success": True, "safe_success": True, "max_pen": 0.0})
+        vector = self._vector(
+            {"success": True, "safe_success": True, "unsafe": False, "max_pen": 0.0}
+        )
         with pytest.raises(ScoreContractError, match="no truth value"):
             bool(vector)
 
@@ -406,7 +418,9 @@ class TestTrialVector:
         assert project(vector, spec) == 0.0
 
     def test_gated_reach_is_one_only_on_clean_raw_success(self):
-        vector = self._vector({"success": True, "safe_success": True, "max_pen": 0.01})
+        vector = self._vector(
+            {"success": True, "safe_success": True, "unsafe": False, "max_pen": 0.01}
+        )
         spec = ProjectionSpec(id="gated_reach_v0", version="0")
         assert project(vector, spec) == 1.0
 

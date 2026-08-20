@@ -28,7 +28,12 @@ interaction_mode = "closed-loop"
 protocol_version = "1"
 observations = ["joint-ee-obs"]
 actions = ["velocity-rpm-cmd"]
-modalities = ["robotic-kinematics"]
+
+[[interface.streams]]
+id = "joint-ee-kinematics"
+schema_id = "joint-ee-obs"
+adapter = "robotic-kinematics"
+adapter_digest = "d6db8147239ca7e73213fe80fb9130fc9a88f44510962ab59a02ae5255cddc24"
 
 [harness]
 interaction_mode = "closed-loop"
@@ -50,12 +55,18 @@ entrypoint = "verifier.py:load_verifier"
 
 [[verifier.gates]]
 id = "haptic_boundary_overshoot"
-source = "info.haptic_overshoot_mm"
-fail_when = "haptic_overshoot_mm > 0.5"
+source = "info.max_overshoot_mm"
+fail_when = "max_overshoot_mm > 0.5"
 maps_to = "unsafe"
 kind = "spatial-exclusion"
 threshold = 0.5
 unit = "mm"
+[verifier.gates.threshold_basis]
+value = 0.5
+unit = "mm"
+citation = "Orthopedic burr haptic boundary tolerance per task safety envelope v1"
+owner = "SurgEval fixtures"
+version = "0"
 
 [[verifier.metrics]]
 id = "safe_resection"

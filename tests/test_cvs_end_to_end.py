@@ -37,8 +37,16 @@ def test_cvs_run_and_replay(tmp_path: Path) -> None:
         assert trial.vector.gates[0].id == "critical_structure_misid"
         assert len(trial.vector.metrics) >= 3
     config = json.loads((out / "config.json").read_text(encoding="utf-8"))
-    assert config["modality_adapter"]["modality"] == "video-laparoscopic"
-    assert config["modality_adapter"]["adapter"] == "VideoAdapter"
+    assert config["streams"] == [
+        {
+            "id": "laparoscopic-video",
+            "adapter": "video-laparoscopic",
+            "schema": "video-clip",
+        }
+    ]
+
+    # Stream provenance replaces the old modality_adapter field.
+    assert "modality_adapter" not in config
     assert (out / "scorecard.json").exists()
     assert (out / "scorecard.md").exists()
     assert (out / "scorecard.html").exists()
@@ -52,7 +60,7 @@ def test_cvs_adapter_on_execution_path(tmp_path: Path) -> None:
     result = run_job(task=task, task_dir=TASK_DIR, agent=agent, agent_dir=AGENT_DIR, out=out, n=1)
     trajectory = result.trials[0].trajectory
     first_step = trajectory[0]
-    obs = first_step["obs"]
+    obs = first_step["obs"]["laparoscopic-video"]
     assert isinstance(obs, dict)
     assert "clip_id" in obs, "agent must receive adapter output with clip_id, not raw item with id"
     assert "modality" in obs

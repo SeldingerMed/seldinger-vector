@@ -13,6 +13,7 @@ from or_audit.eval.contracts import (
     MetricDirection,
     MetricKind,
 )
+from or_audit.eval.evidence import EvidenceReference
 from or_audit.eval.task import ProjectionSpec
 
 
@@ -22,6 +23,15 @@ class GateOutcome(BaseModel):
     id: str
     status: GateStatus
     reason: str = ""
+    #: Declared realization class that produced this outcome (enum value or slug).
+    realization: str = "scalar-dsl"
+    #: Human description of the oracle/evidence path.
+    provenance: str = ""
+    #: Kernel-resolved, kernel-hashed evidence backing the outcome.
+    evidence: tuple[EvidenceReference, ...] = ()
+    #: Optional uncertainty/confidence for non-DSL realizations.
+    confidence: float | None = None
+    abstained: bool = False
 
 
 class MetricOutcome(BaseModel):

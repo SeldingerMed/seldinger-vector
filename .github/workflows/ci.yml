@@ -47,3 +47,22 @@ jobs:
         run: uv sync --all-extras --python ${{ matrix.python-version }}
       - name: Pytest
         run: uv run --python ${{ matrix.python-version }} pytest --cov --cov-report=term-missing --cov-fail-under=90
+
+  packaging:
+    name: OSS packaging gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Runtime license allowlist
+        run: uv run python scripts/check_license_allowlist.py
+      - name: Identity consolidation + wheel contents
+        run: uv run python scripts/check_identity.py
+      - name: SBOM generation + structural SPDX-2.3 validation
+        run: |
+          uv run python scripts/gen_sbom.py --out sbom.spdx.json
+          uv run python scripts/validate_sbom.py --sbom sbom.spdx.json
+      - name: Validate neutral example taskset
+        run: uv run surgeval tasksets validate docs/examples/tasksets/consequence-rank-v1

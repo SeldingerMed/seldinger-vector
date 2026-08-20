@@ -9,7 +9,6 @@ from typing import Any
 
 from or_audit.audit.canonical import digest
 from or_audit.errors import TaskContractError
-from or_audit.eval.adapters import get_adapter
 from or_audit.eval.agent import AgentPackage
 from or_audit.eval.bind import assert_bind
 from or_audit.eval.contracts import CapabilitySpec, InteractionMode
@@ -43,23 +42,67 @@ from or_audit.eval.verifier import score_context
 SAFETY_MAX_PEN = 0.3
 
 
-def _modality_adapter(task: TaskSpec) -> Any:
-    """Return an instantiated adapter for the task's declared modality, or None."""
-    if not task.interface.modalities:
-        return None
-    return get_adapter(task.interface.modalities[0])
+def _stream_adapters(task: TaskSpec) -> dict[str, Any]:
+    """Resolve every stream's adapter, keyed by stream id (raises on unknown)."""
+    from or_audit.eval.adapters import require_adapter
+
+    return {s.id: require_adapter(s.adapter) for s in task.interface.streams}
 
 
-def _preprocess_observation(adapter: Any, item: dict[str, Any]) -> dict[str, Any]:
-    """Run an item through the modality adapter into a JSON-serializable dict."""
-    if adapter is None:
+def _source_parts(locator: str) -> list[str]:
+    """Split a source locator into path parts (``$`` -> whole observation)."""
+    if locator == "$":
+        return []
+    if locator.startswith("/"):
+        return [
+            part.replace("~1", "/").replace("~0", "~") for part in locator[1:].split("/") if part
+        ]
+    return locator.split(".")
+
+
+def _get_source(item: dict[str, Any], locator: str) -> Any:
+    """Address the observation slice a stream consumes, or raise if missing."""
+    if locator == "$":
         return item
-    processed = adapter.preprocess_observation(item)
-    if isinstance(processed, dict):
-        return processed
-    if is_dataclass(processed) and not isinstance(processed, type):
-        return asdict(processed)
-    return item
+    cur: Any = item
+    for part in _source_parts(locator):
+        if not isinstance(cur, dict) or part not in cur:
+            raise TaskContractError(f"stream source {locator!r} not present in observation")
+        cur = cur[part]
+    return cur
+
+
+def _preprocess_observation(
+    task: TaskSpec, adapters: dict[str, Any], item: dict[str, Any]
+) -> dict[str, Any]:
+    """Compose each stream's processed source slice into a fresh payload.
+
+    Every stream reads its slice from the *original* observation and its
+    output lands under its own stream id — never written back into the shared
+    observation, so ``source=\"$\"`` streams cannot consume each other's
+    output, and the agent always sees which channel produced a value.
+    Closed-loop observations are commonly ndarrays, so JSONable scalars, lists
+    and arrays are accepted, not just dicts.
+    """
+    composed: dict[str, Any] = {}
+    if not task.interface.streams:
+        return item
+    for stream in task.interface.streams:
+        adapter = adapters.get(stream.id)
+        if adapter is None:
+            continue
+        source = _get_source(item, stream.source)
+        processed = adapter.preprocess_observation(source)
+        if isinstance(processed, dict):
+            normalized = processed
+        elif hasattr(processed, "tolist"):  # ndarray / array-like
+            normalized = processed.tolist()
+        elif is_dataclass(processed) and not isinstance(processed, type):
+            normalized = asdict(processed)
+        else:
+            normalized = processed
+        composed[stream.id] = normalized
+    return composed
 
 
 def _close(runtime: object | None) -> None:
@@ -122,12 +165,11 @@ def run_job(
         "interaction_mode": task.harness.interaction_mode.value,
         "world_engine": _engine_provenance(task, None),
     }
-    adapter = _modality_adapter(task)
-    if adapter is not None:
-        extra["modality_adapter"] = {
-            "modality": task.interface.modalities[0],
-            "adapter": type(adapter).__name__,
-        }
+    if task.interface.streams:
+        extra["streams"] = [
+            {"id": s.id, "adapter": s.adapter, "schema": s.schema_id}
+            for s in task.interface.streams
+        ]
     binding_cap = next(
         (c for c in agent.capabilities if c.interface == task.interface.id and c.schema_wildcard),
         None,
@@ -223,6 +265,7 @@ def _run_closed_loop(
         env = sim_engine if sim_engine is not None else make_gym(task)
     provenance = _engine_provenance(task, env)
     identity = agent_identity(agent)
+    adapters = _stream_adapters(task)
     unwrapped = getattr(env, "unwrapped", env)
     nested = getattr(unwrapped, "_env", unwrapped)
     safety = float(getattr(nested, "safety_max_pen", SAFETY_MAX_PEN))
@@ -265,7 +308,7 @@ def _run_closed_loop(
             ) -> Any:
                 if policy is None:
                     return sample_action(world, seed=episode_seed, step=step)
-                return policy.act(observation, step=step)
+                return policy.act(_preprocess_observation(task, adapters, observation), step=step)
 
             info, steps = run_gym_episode(
                 env,
@@ -354,14 +397,14 @@ def _run_predictions(
     )
     verifier = load_verifier_runtime(task_dir, task.verifier.entrypoint)
     identity = agent_identity(agent)
-    adapter = _modality_adapter(task)
+    adapters = _stream_adapters(task)
     trials = []
     try:
         for seed, item in enumerate(inputs[:n]):
             item_id = str(item["id"])
             if item_id not in labels:
                 raise TaskContractError(f"task {task.id} has no label for item {item_id!r}")
-            agent_input = _preprocess_observation(adapter, item)
+            agent_input = _preprocess_observation(task, adapters, item)
             prediction = predictor.predict(agent_input)
             context_kind = (
                 "counterfactual" if mode is InteractionMode.COUNTERFACTUAL else "video-predict"

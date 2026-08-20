@@ -13,7 +13,8 @@ class CvsDetector:
         self._predictions = {str(item["id"]): item for item in payload["items"]}
 
     def predict(self, item: dict[str, Any]) -> dict[str, Any]:
-        clip_id = str(item.get("clip_id") or item.get("id") or "")
+        obs = item.get("laparoscopic-video") or item
+        clip_id = str(obs.get("clip_id") or obs.get("id") or "")
         return dict(self._predictions[clip_id])
 
 

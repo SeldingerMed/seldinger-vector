@@ -8,6 +8,9 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 from or_audit.eval.contracts import InteractionMode, PerturbationSpec, ScenarioSpec
+from or_audit.eval.evidence import EvidenceReference
+
+__all__ = ["EvidenceReference"]
 
 
 class FailureEvent(BaseModel):
@@ -51,15 +54,6 @@ class TimingEvent(BaseModel):
     started_ms: float | None = None
     duration_ms: float | None = None
     deadline_ms: float | None = None
-
-
-class EvidenceReference(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    id: str
-    uri: str
-    digest: str = ""
-    media_type: str = ""
 
 
 def _enrich_info(payload: dict[str, Any]) -> dict[str, Any]:
