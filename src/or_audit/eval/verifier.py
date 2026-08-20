@@ -7,6 +7,8 @@ from typing import Any
 
 from or_audit.domain.enums import GateStatus
 from or_audit.errors import TaskContractError
+from or_audit.eval.evidence import _MISSING, EvidenceReference, resolve_binding
+from or_audit.eval.gate_dsl import evaluate_gate, is_scalar_realization
 from or_audit.eval.plugins import VerifierRuntime, load_verifier_runtime
 from or_audit.eval.task import TaskSpec
 from or_audit.eval.vector import GateOutcome, MetricOutcome, TrialVector
@@ -42,10 +44,15 @@ def score_context(
 
     declared_gates = [gate.id for gate in task.verifier.gates]
     declared_metrics = [metric.id for metric in task.verifier.metrics]
-    if set(raw_gates) != set(declared_gates):
+    scalar_ids = {gate.id for gate in task.verifier.gates if is_scalar_realization(gate)}
+    # scalar-dsl gates are evaluated by the kernel over evidence bindings, so
+    # the verifier need not (and must not) self-report their status. Only
+    # non-DSL declared-realization gates are attributed to the verifier.
+    required_gates = [gid for gid in declared_gates if gid not in scalar_ids]
+    missing_gates = [gid for gid in required_gates if gid not in raw_gates]
+    if missing_gates:
         raise TaskContractError(
-            f"verifier gates {sorted(raw_gates)} do not match declared gates "
-            f"{sorted(declared_gates)}"
+            f"verifier did not report required declared gates {sorted(missing_gates)}"
         )
     if set(raw_metrics) != set(declared_metrics):
         raise TaskContractError(
@@ -54,7 +61,16 @@ def score_context(
         )
 
     gates = []
-    for gate_id in declared_gates:
+    for gate_spec in task.verifier.gates:
+        gate_id = gate_spec.id
+        dsl_outcome = evaluate_gate(gate_spec, context, task_root=task_dir)
+        if dsl_outcome is not None:
+            # scalar-dsl: outcome is fully kernel-resolved and kernel-hashed.
+            gates.append(dsl_outcome)
+            continue
+        # Non-DSL declared realization (learned/spatial/temporal/human/sim):
+        # accept the realization's outcome, but stamp its declared realization
+        # and provenance so it is never an opaque self-reported scalar status.
         outcome = raw_gates[gate_id]
         if not isinstance(outcome, dict):
             raise TaskContractError(f"gate {gate_id} outcome must be an object")
@@ -68,7 +84,64 @@ def score_context(
         reason = outcome.get("reason", "")
         if not isinstance(reason, str):
             raise TaskContractError(f"gate {gate_id} reason must be text")
-        gates.append(GateOutcome(id=gate_id, status=status, reason=reason))
+        realization = getattr(gate_spec.realization, "value", gate_spec.realization)
+        # The realization's inputs are still kernel-resolved and kernel-hashed,
+        # so an opaque verdict cannot fabricate the evidence it consumed.
+        evidence: list[EvidenceReference] = []
+        missing_input = False
+        for name, locator in gate_spec.evidence_bindings.items():
+            value, uri, digest = resolve_binding(
+                locator,
+                context=context,
+                task_root=task_dir,
+                absent_default=gate_spec.input_defaults.get(name, _MISSING),
+            )
+            if value is _MISSING or value is None:
+                missing_input = True
+                evidence.append(EvidenceReference(id=name, uri=uri, digest="", signal=name))
+            else:
+                evidence.append(EvidenceReference(id=name, uri=uri, digest=digest, signal=name))
+        # Accept PASS/FAIL only when every declared input has kernel evidence.
+        # A missing/null input forces abstention, never an evidence-free verdict.
+        if missing_input:
+            gates.append(
+                GateOutcome(
+                    id=gate_id,
+                    status=GateStatus.NOT_ASSESSABLE,
+                    reason="declared realization missing kernel-resolved evidence input(s)",
+                    realization=str(realization),
+                    provenance=gate_spec.provenance,
+                    evidence=tuple(evidence),
+                    abstained=True,
+                )
+            )
+            continue
+        confidence = outcome.get("confidence")
+        if confidence is not None and not isinstance(confidence, int | float):
+            raise TaskContractError(f"gate {gate_id} confidence must be numeric")
+        if confidence is not None:
+            confidence = min(max(float(confidence), 0.0), 1.0)
+        abstained = bool(outcome.get("abstained", False))
+        if abstained:
+            # Abstention is never an implicit pass/fail. A verifier that opts
+            # out yields NOT_ASSESSABLE regardless of any status it also
+            # reported; downstream reward logic must treat the gate as
+            # unassessable, never as evidence of a pass.
+            status = GateStatus.NOT_ASSESSABLE
+            if not reason:
+                reason = f"gate {gate_id} verifier abstained"
+        gates.append(
+            GateOutcome(
+                id=gate_id,
+                status=status,
+                reason=reason,
+                realization=str(realization),
+                provenance=gate_spec.provenance,
+                evidence=tuple(evidence),
+                confidence=confidence,
+                abstained=abstained,
+            )
+        )
 
     metrics = []
     for metric_id in declared_metrics:

@@ -394,11 +394,11 @@ def _sim_list(args: argparse.Namespace) -> int:
 def _cli_prog() -> str:
     """Return the installed command name for help output."""
     if not sys.argv:
-        return "vector"
+        return "surgeval"
     stem = Path(sys.argv[0]).stem
     if stem in {"surgeval", "vector", "or-audit"}:
         return stem
-    return "vector"
+    return "surgeval"
 
 
 def build_parser(prog: str | None = None) -> argparse.ArgumentParser:

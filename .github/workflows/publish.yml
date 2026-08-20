@@ -1,0 +1,198 @@
+name: Publish
+
+# Publisher-signature verification at the release-artifact layer.
+#
+# Trust model: no dormant in-band signing key. Publisher provenance is
+# established out-of-band and enforced end to end:
+#
+#   1. PyPI trusted publishing (OIDC) — secretless upload; GitHub's OIDC
+#      id-token proves workflow identity to PyPI.
+#   2. Sigstore build attestations, two independent records over the SAME
+#      built bytes:
+#      - a GitHub Artifact Attestation (``actions/attest-build-provenance``),
+#        verified cryptographically by ``gh attestation verify`` against
+#        Sigstore's public-good root (this is the publisher-signature check);
+#      - a PEP 740 attestation stored on PyPI by ``gh-action-pypi-publish``,
+#        whose *presence* and digest-consistency are confirmed by
+#        ``scripts/check_pypi_attestation.py`` (the crypto verification of the
+#        same bytes is the GitHub attestation above).
+#
+# Least privilege: only jobs that publish/attest hold ``id-token``; the build
+# job that executes project code is unprivileged and hands over immutable
+# artifacts via upload/download. Project code is never built or installed in a
+# job that holds OIDC release credentials.
+#
+# Task-registry (taskset/agent) signature verification is a separate trust
+# domain; see docs/OSS_GOVERNANCE.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 0.4.0). Must match pyproject/package version."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # Manual releases must originate on main; the tag-triggered path is the
+    # sole other entry (pushed v* tags). Skipping this job cascades to every
+    # dependent job, so a dispatch from a feature branch runs nothing.
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Resolve release version
+        id: version
+        env:
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            # The dispatch input is user-controlled; never splice it into a
+            # shell program. Validate it looks like a version, then pass it
+            # through the environment rather than the command string.
+            if ! printf '%s' "$DISPATCH_VERSION" | grep -Eq '^[0-9][A-Za-z0-9._+]*$'; then
+              echo "invalid release version: $DISPATCH_VERSION" >&2
+              exit 1
+            fi
+            echo "value=$DISPATCH_VERSION" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Enforce pre-publication version gate
+        run: uv run python scripts/check_identity.py --expected-version "${{ steps.version.outputs.value }}"
+      - name: Install
+        run: uv sync --all-extras
+      - name: Test
+        run: uv run pytest -q
+      - name: Verify runtime licenses (commercial allowlist)
+        run: uv run python scripts/check_license_allowlist.py
+      - name: Verify identity consolidation
+        run: uv run python scripts/check_identity.py
+      - name: Build sdist + wheel
+        run: uv build
+      - name: Twine metadata check
+        run: uvx twine check dist/*
+      - name: Generate SPDX SBOM
+        run: uv run python scripts/gen_sbom.py --out sbom.spdx.json
+      - name: Validate SBOM against SPDX 2.3 schema
+        run: |
+          curl -fsSL \
+            https://raw.githubusercontent.com/spdx/spdx-spec/v2.3/schemas/spdx-schema.json \
+            -o spdx-schema.json
+          uv pip install jsonschema
+          uv run python scripts/validate_sbom.py --sbom sbom.spdx.json --schema spdx-schema.json
+      - name: Record artifact digests
+        run: sha256sum dist/* sbom.spdx.json > RELEASE_DIGESTS.txt
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: surgeval-dist
+          path: |
+            dist/
+            sbom.spdx.json
+            RELEASE_DIGESTS.txt
+
+  attest:
+    name: Attest + verify (GitHub Sigstore)
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: surgeval-dist
+      - name: Attest build provenance (GitHub artifact attestation)
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist/*
+      - name: Verify GitHub attestation (Sigstore public-good root)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for file in dist/*; do
+            gh attestation verify "$file" \
+              --repo "${{ github.repository }}" \
+              --predicate-type https://slsa.dev/provenance/v1
+          done
+
+  publish:
+    name: Publish to PyPI (minimal, OIDC)
+    runs-on: ubuntu-latest
+    needs: attest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: surgeval-dist
+      - name: Publish to PyPI (trusted publishing + PEP 740 attestations)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          attestations: "true"
+
+  verify-pypi:
+    name: Check PyPI PEP 740 bundle + digest (unprivileged)
+    runs-on: ubuntu-latest
+    needs: [publish, build]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sync (for scripts + uv)
+        run: uv sync --no-dev
+      - uses: actions/download-artifact@v4
+        with:
+          name: surgeval-dist
+      - name: Check PyPI serves built digests with PEP 740 bundles present
+        run: |
+          version="${{ needs.build.outputs.version }}"
+          # PEP 740 index entry may lag upload by a few seconds; retry before failing.
+          for attempt in 1 2 3 4 5; do
+            if uv run python scripts/check_pypi_attestation.py \
+              "$version" RELEASE_DIGESTS.txt \
+              --publisher-repo "${{ github.repository }}"; then
+              exit 0
+            fi
+            echo "provenance not yet visible (attempt $attempt); retrying"
+            sleep 10
+          done
+          exit 1
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [attest, verify-pypi, build]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: surgeval-dist
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'push' && github.ref_name || format('v{0}', needs.build.outputs.version) }}
+          files: |
+            dist/surgeval-*.whl
+            dist/surgeval-*.tar.gz
+            sbom.spdx.json
+            RELEASE_DIGESTS.txt
+          generate_release_notes: true

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +33,7 @@ from or_audit.eval.plugins import (
 )
 from or_audit.eval.predict import index_items, load_claim_footer, load_items
 from or_audit.eval.reconstitute import assert_trajectory_matches_vector
-from or_audit.eval.sim import get_simulation_engine
+from or_audit.eval.sim import BACKEND_UNKNOWN, get_simulation_engine
 from or_audit.eval.task import TaskSpec
 from or_audit.eval.trace import ProceduralTrace
 from or_audit.eval.vector import project
@@ -41,10 +42,88 @@ from or_audit.eval.verifier import score_context
 SAFETY_MAX_PEN = 0.3
 
 
+def _stream_adapters(task: TaskSpec) -> dict[str, Any]:
+    """Resolve every stream's adapter, keyed by stream id (raises on unknown)."""
+    from or_audit.eval.adapters import require_adapter
+
+    return {s.id: require_adapter(s.adapter) for s in task.interface.streams}
+
+
+def _source_parts(locator: str) -> list[str]:
+    """Split a source locator into path parts (``$`` -> whole observation)."""
+    if locator == "$":
+        return []
+    if locator.startswith("/"):
+        return [
+            part.replace("~1", "/").replace("~0", "~") for part in locator[1:].split("/") if part
+        ]
+    return locator.split(".")
+
+
+def _get_source(item: dict[str, Any], locator: str) -> Any:
+    """Address the observation slice a stream consumes, or raise if missing."""
+    if locator == "$":
+        return item
+    cur: Any = item
+    for part in _source_parts(locator):
+        if not isinstance(cur, dict) or part not in cur:
+            raise TaskContractError(f"stream source {locator!r} not present in observation")
+        cur = cur[part]
+    return cur
+
+
+def _preprocess_observation(
+    task: TaskSpec, adapters: dict[str, Any], item: dict[str, Any]
+) -> dict[str, Any]:
+    """Compose each stream's processed source slice into a fresh payload.
+
+    Every stream reads its slice from the *original* observation and its
+    output lands under its own stream id — never written back into the shared
+    observation, so ``source=\"$\"`` streams cannot consume each other's
+    output, and the agent always sees which channel produced a value.
+    Closed-loop observations are commonly ndarrays, so JSONable scalars, lists
+    and arrays are accepted, not just dicts.
+    """
+    composed: dict[str, Any] = {}
+    if not task.interface.streams:
+        return item
+    for stream in task.interface.streams:
+        adapter = adapters.get(stream.id)
+        if adapter is None:
+            continue
+        source = _get_source(item, stream.source)
+        processed = adapter.preprocess_observation(source)
+        if isinstance(processed, dict):
+            normalized = processed
+        elif hasattr(processed, "tolist"):  # ndarray / array-like
+            normalized = processed.tolist()
+        elif is_dataclass(processed) and not isinstance(processed, type):
+            normalized = asdict(processed)
+        else:
+            normalized = processed
+        composed[stream.id] = normalized
+    return composed
+
+
 def _close(runtime: object | None) -> None:
     close = getattr(runtime, "close", None)
     if callable(close):
         close()
+
+
+def _engine_provenance(task: TaskSpec, env: object | None) -> dict[str, Any]:
+    """Attest which engine produced the observations; an absent reporter is not omission."""
+    reporter = getattr(env, "engine_provenance", None)
+    if callable(reporter):
+        reported = reporter()
+        if isinstance(reported, dict):
+            return {str(key): value for key, value in reported.items()}
+    return {
+        "engine": task.environment.kind.value,
+        "backend": BACKEND_UNKNOWN,
+        "backend_version": "",
+        "world_pin": task.environment.world_pin,
+    }
 
 
 def builtin_random_agent(interface_id: str = "gym-policy") -> AgentPackage:
@@ -82,9 +161,23 @@ def run_job(
     episodes = n if n is not None else task.environment.n_eval_episodes
     if episodes < 1:
         raise TaskContractError(f"n must be >= 1, got {episodes}")
-    extra: dict[str, Any] = {"interaction_mode": task.harness.interaction_mode.value}
+    extra: dict[str, Any] = {
+        "interaction_mode": task.harness.interaction_mode.value,
+        "world_engine": _engine_provenance(task, None),
+    }
+    if task.interface.streams:
+        extra["streams"] = [
+            {"id": s.id, "adapter": s.adapter, "schema": s.schema_id}
+            for s in task.interface.streams
+        ]
+    binding_cap = next(
+        (c for c in agent.capabilities if c.interface == task.interface.id and c.schema_wildcard),
+        None,
+    )
+    if binding_cap is not None:
+        extra["binding_mode"] = "wildcard"
     if task.harness.interaction_mode is InteractionMode.CLOSED_LOOP:
-        result, safety = _run_closed_loop(
+        result, safety, provenance = _run_closed_loop(
             task=task,
             task_dir=task_dir,
             agent=agent,
@@ -95,6 +188,7 @@ def run_job(
             gym_factory=gym_factory,
         )
         extra["safety_max_pen"] = safety
+        extra["world_engine"] = provenance
     elif task.harness.interaction_mode is InteractionMode.SINGLE_TURN:
         result = _run_single_turn(
             task=task,
@@ -155,7 +249,7 @@ def _run_closed_loop(
     task_digest: str,
     agent_digest: str,
     gym_factory: GymFactory | None,
-) -> tuple[JobResult, float]:
+) -> tuple[JobResult, float, dict[str, Any]]:
     if agent.kind not in {AgentKind.RANDOM.value, AgentKind.POLICY.value}:
         raise TaskContractError(f"closed-loop runner does not implement kind={agent.kind}")
     policy = None
@@ -169,7 +263,9 @@ def _run_closed_loop(
     else:
         sim_engine = get_simulation_engine(task)
         env = sim_engine if sim_engine is not None else make_gym(task)
+    provenance = _engine_provenance(task, env)
     identity = agent_identity(agent)
+    adapters = _stream_adapters(task)
     unwrapped = getattr(env, "unwrapped", env)
     nested = getattr(unwrapped, "_env", unwrapped)
     safety = float(getattr(nested, "safety_max_pen", SAFETY_MAX_PEN))
@@ -212,7 +308,7 @@ def _run_closed_loop(
             ) -> Any:
                 if policy is None:
                     return sample_action(world, seed=episode_seed, step=step)
-                return policy.act(observation, step=step)
+                return policy.act(_preprocess_observation(task, adapters, observation), step=step)
 
             info, steps = run_gym_episode(
                 env,
@@ -274,9 +370,11 @@ def _run_closed_loop(
             agent=agent,
             trials=tuple(trials),
             task_digest=task_digest,
+            world_engine=provenance,
             agent_digest=agent_digest,
         ),
         safety,
+        provenance,
     )
 
 
@@ -300,13 +398,15 @@ def _run_predictions(
     )
     verifier = load_verifier_runtime(task_dir, task.verifier.entrypoint)
     identity = agent_identity(agent)
+    adapters = _stream_adapters(task)
     trials = []
     try:
         for seed, item in enumerate(inputs[:n]):
             item_id = str(item["id"])
             if item_id not in labels:
                 raise TaskContractError(f"task {task.id} has no label for item {item_id!r}")
-            prediction = predictor.predict(item)
+            agent_input = _preprocess_observation(task, adapters, item)
+            prediction = predictor.predict(agent_input)
             context_kind = (
                 "counterfactual" if mode is InteractionMode.COUNTERFACTUAL else "video-predict"
             )
@@ -326,7 +426,7 @@ def _run_predictions(
             )
             trace_payload: dict[str, Any] = {
                 **context,
-                "obs": item,
+                "obs": agent_input,
                 "output": prediction,
                 "transition": {"oracle_evidence": labels[item_id]},
             }
@@ -388,6 +488,7 @@ def _run_predictions(
         task_digest=task_digest,
         agent_digest=agent_digest,
         claim_footer=footer,
+        world_engine=_engine_provenance(task, None),
     )
 
 
@@ -516,6 +617,7 @@ def _run_interactive(
         task_digest=task_digest,
         agent_digest=agent_digest,
         claim_footer=footer,
+        world_engine=_engine_provenance(task, None),
     )
 
 

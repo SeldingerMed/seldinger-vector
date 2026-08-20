@@ -1,0 +1,10 @@
+format_version = "2"
+id = "example/consequence-rank"
+taskset_version = "1"
+headline = "correct_intervention"
+phi_class = "procedural"
+description = "Vendor-neutral seed taskset demonstrating the open taskset model. Reuses the consequence-ranking task under a neutral identity so anyone can publish tasksets without a Seldinger first-party namespace. Bundled tasksets must stay vendor-neutral; first-party Seldinger tasksets live in the SeldingerMed/seldinger-tasks registry, not here."
+
+tasks = [
+  "../../tasks/counterfactual-recovery",
+]

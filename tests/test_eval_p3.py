@@ -17,7 +17,7 @@ from or_audit.eval.cartesian import (
 )
 from or_audit.eval.enums import ProjectionId
 from or_audit.eval.export_rl import export_rl
-from or_audit.eval.job import read_job_result
+from or_audit.eval.job import JobResult, compute_head, read_job_result
 from or_audit.eval.job_config import load_job_config, resolve_job
 from or_audit.eval.loader import load_agent, load_task
 from or_audit.eval.reconstitute import reconstitute_trial_vector
@@ -232,6 +232,20 @@ def test_export_rl_refuses_video_gated_reach(tmp_path: Path) -> None:
         agent_dir=VIDEO_AGENT,
         out=out,
     )
+    # A fresh video run has no runtime reporter, so its provenance is "unknown"
+    # and export refuses it as unattested. Attest a real (physical) backend and
+    # re-stamp the head so the projection-level refusal is what we exercise.
+    result_path = out / "result.json"
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    we = payload["world_engine"]
+    payload["world_engine"] = {
+        "engine": we.get("engine", ""),
+        "backend": "real",
+        "backend_version": "",
+        "world_pin": we.get("world_pin", ""),
+    }
+    payload["head"] = compute_head(JobResult.model_validate(payload))
+    result_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
     with pytest.raises(TaskContractError, match="diverged"):
         export_rl(
             out,
@@ -252,6 +266,10 @@ def test_export_rl_refuses_stored_projection_disagreement(tmp_path: Path) -> Non
     result_path = pair / "result.json"
     payload = json.loads(result_path.read_text(encoding="utf-8"))
     payload["trials"][1]["projection"] = 1.0
+    # Re-stamp a consistent head so the tampered projection is what the job
+    # actually claims (head-verification passes); export must still refuse
+    # because the stored projection disagrees with the recomputed score.
+    payload["head"] = compute_head(JobResult.model_validate(payload))
     result_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
     with pytest.raises(ScoreContractError, match="homemade float"):
         export_rl(pair, projection_id=ProjectionId.GATED_REACH_V0, out=tmp_path / "x.jsonl")
@@ -303,7 +321,7 @@ def test_reconstitute_refuses_unknown_trajectory(tmp_path: Path) -> None:
 def test_cli_run_job_and_export(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr("or_audit.eval.runner.make_gym", _fake)
+    monkeypatch.setattr("or_audit.eval.sim.gym_bridge.make_gym", _fake)
     task_dir = _pinned_lumen(tmp_path)
     job_dir = _write_job(tmp_path, task_dir, n=2)
     out = tmp_path / "cli-job"
@@ -415,7 +433,7 @@ def test_cli_export_rl_refuses_undeclared_projection(tmp_path: Path) -> None:
 
 
 def test_cli_n_overrides_job_n(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("or_audit.eval.runner.make_gym", _fake)
+    monkeypatch.setattr("or_audit.eval.sim.gym_bridge.make_gym", _fake)
     task_dir = _pinned_lumen(tmp_path)
     job_dir = _write_job(tmp_path, task_dir, n=30)
     out = tmp_path / "cli-n"

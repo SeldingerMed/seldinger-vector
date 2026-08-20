@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from or_audit.eval.adapters.base import ModalityAdapter, register_adapter
+from or_audit.eval.adapters.base import ModalityAdapter
 from or_audit.eval.enums import ModalityKind
 
 
@@ -137,6 +137,3 @@ class EndoluminalAdapter(ModalityAdapter):
             }
         )
         return spec
-
-
-register_adapter(ModalityKind.AIRWAY_BRONCHOSCOPY, EndoluminalAdapter, override=True)

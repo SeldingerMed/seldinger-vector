@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from or_audit.eval.adapters.base import ModalityAdapter, register_adapter
+from or_audit.eval.adapters.base import ModalityAdapter
 from or_audit.eval.enums import ModalityKind
 
 
@@ -83,6 +83,19 @@ class VideoAdapter(ModalityAdapter):
                 active_tools=tuple(tools) if isinstance(tools, (list, tuple)) else (),
                 extra=extra_dict if isinstance(extra_dict, dict) else {},
             )
+        if isinstance(observation, dict) and "video_uri" in observation:
+            return {
+                "frame_index": 0,
+                "timestamp_ms": 0.0,
+                "image_uri": str(observation["video_uri"]),
+                "clip_id": str(observation.get("id", "")),
+                "frame_count": int(observation.get("frame_count", 0)),
+                "modality": (
+                    self.modality.value
+                    if isinstance(self.modality, ModalityKind)
+                    else str(self.modality)
+                ),
+            }
         return observation
 
     def postprocess_action(self, action: Any) -> Any:
@@ -131,11 +144,3 @@ class VideoAdapter(ModalityAdapter):
             }
         )
         return spec
-
-
-register_adapter(ModalityKind.VIDEO_LAPAROSCOPIC, VideoAdapter, override=True)
-register_adapter(
-    ModalityKind.VIDEO_ENDOSCOPIC,
-    lambda **kw: VideoAdapter(ModalityKind.VIDEO_ENDOSCOPIC, **kw),
-    override=True,
-)

@@ -48,6 +48,15 @@ entrypoint = "verifier.py:load_verifier"
 
 [[verifier.gates]]
 id = "finite_metric_check"
+realization = "release-audit"
+provenance = "release-audit verifier derives finiteness from the five kernel-hashed predicted release metrics (all finite, no NaN/Inf) in the pinned AngioStress audit"
+
+[verifier.gates.inputs]
+dias_prediction_count = "prediction.dias_prediction_count"
+cathaction_prediction_count = "prediction.cathaction_prediction_count"
+sam_vit_b_mean_dice = "prediction.sam_vit_b_mean_dice"
+sam_vit_l_mean_dice = "prediction.sam_vit_l_mean_dice"
+medsam_vit_b_mean_dice = "prediction.medsam_vit_b_mean_dice"
 
 [[verifier.metrics]]
 id = "release_audit_passed"

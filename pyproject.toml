@@ -1,7 +1,7 @@
 [project]
-name = "vector"
+name = "surgeval"
 version = "0.3.0a0"
-description = "Vector — independent evaluation infrastructure for procedural medical AI"
+description = "SurgEval — independent evaluation infrastructure for procedural medical AI"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
@@ -9,6 +9,7 @@ authors = [{ name = "SeldingerMed" }]
 dependencies = [
     "pydantic>=2.7,<3",
     "numpy>=1.26",
+    "cloudpickle>=3.0",
 ]
 
 [project.scripts]
@@ -21,9 +22,6 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.6",
     "mypy>=1.11",
-]
-lumen = [
-    "seldinger-lumen[solver,gym] @ git+https://github.com/SeldingerMed/seldinger-lumen.git@3c6bb39ecc916c73e81131b94353ad8deee62bd4",
 ]
 
 [build-system]
@@ -89,5 +87,21 @@ disallow_untyped_defs = false
 disallow_incomplete_defs = false
 
 [[tool.mypy.overrides]]
-module = ["lumen.*", "gymnasium.*", "torch.*"]
+module = [
+    "lumen.*",
+    "gymnasium.*",
+    "torch.*",
+    "Sofa",
+    "Sofa.*",
+    "SofaRuntime",
+    "SofaRuntime.*",
+    "sofagym",
+    "sofagym.*",
+    "warp",
+    "warp.*",
+    "isaaclab",
+    "isaaclab.*",
+    "cloudpickle",
+    "cloudpickle.*",
+]
 ignore_missing_imports = true

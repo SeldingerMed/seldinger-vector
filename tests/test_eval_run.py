@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 
 import numpy as np
+import pydantic
 import pytest
 
 from or_audit.cli import main
@@ -13,6 +14,7 @@ from or_audit.errors import TaskContractError
 from or_audit.eval.job import TrialRecord, assemble_job_result, read_job_result
 from or_audit.eval.loader import load_agent, load_task
 from or_audit.eval.runner import builtin_random_agent, replay_job, run_job
+from or_audit.eval.sim.base import BACKEND_REAL
 from or_audit.eval.vector import TrialVector
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,6 +36,16 @@ class FakeLumenEnv:
 
     safety_max_pen = 0.3
     action_space = _Box()
+
+    def engine_provenance(self) -> dict[str, str]:
+        # This fixture stands in for a real Lumen gym backend, so it attests
+        # BACKEND_REAL with the full reporter contract.
+        return {
+            "engine": "lumen-nav-safe",
+            "backend": BACKEND_REAL,
+            "backend_version": "",
+            "world_pin": "test-lumen-pin",
+        }
 
     def __init__(self) -> None:
         self._seed = 0
@@ -140,6 +152,47 @@ def test_gym_replay_matches_head(tmp_path: Path) -> None:
         gym_factory=_fake,
     )
     assert replayed.head == first.head
+
+
+def test_world_engine_provenance_typed_and_head_covered(tmp_path: Path) -> None:
+    from or_audit.eval.job import WorldEngineProvenance, verify_head
+
+    task_dir = _pinned_lumen(tmp_path)
+    out = tmp_path / "job"
+    run_job(
+        task=load_task(task_dir),
+        task_dir=task_dir,
+        agent=builtin_random_agent(),
+        agent_dir=None,
+        out=out,
+        n=2,
+        gym_factory=_fake,
+    )
+    written = read_job_result(out)
+    # provenance is stored as the typed model, not a bare dict
+    assert isinstance(written.world_engine, WorldEngineProvenance)
+    # the FakeLumenEnv attests BACKEND_REAL (not synthetic, not unknown)
+    assert written.world_engine.backend == BACKEND_REAL
+    assert written.world_engine.engine == "lumen-nav-safe"
+    # provenance is bound into the head, so it survives replay verification
+    assert verify_head(written)
+    # a handed-in dict is coerced into the typed model
+    coerced = WorldEngineProvenance(**{"backend": "real", "engine": "lumen-nav-safe"})
+    assert coerced.backend == "real"
+
+
+def test_world_engine_provenance_strict_model() -> None:
+    from or_audit.eval.job import WorldEngineProvenance
+
+    # only the three declared backend states validate
+    for state in ("real", "synthetic-stub", "unknown"):
+        WorldEngineProvenance(engine="e", backend=state)
+    # a typo/ad-hoc backend value is rejected rather than passed through
+    with pytest.raises(pydantic.ValidationError):
+        WorldEngineProvenance(engine="e", backend="gym")
+    # unknown reporter fields are rejected (no silent extra keys)
+    with pytest.raises(pydantic.ValidationError):
+        WorldEngineProvenance.model_validate({"engine": "e", "backend": "real", "rogue": "x"})
 
 
 def test_unpinned_gym_is_not_runnable(tmp_path: Path) -> None:
@@ -314,7 +367,7 @@ def test_cli_run_video(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> No
 
 def test_cli_run_random_gym(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     task_dir = _pinned_lumen(tmp_path)
-    monkeypatch.setattr("or_audit.eval.runner.make_gym", _fake)
+    monkeypatch.setattr("or_audit.eval.sim.gym_bridge.make_gym", _fake)
     out = tmp_path / "cli-gym"
     assert main(["run", "-t", str(task_dir), "-a", "random", "-n", "30", "--out", str(out)]) == 0
     result = read_job_result(out)

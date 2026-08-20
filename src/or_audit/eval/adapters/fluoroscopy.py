@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from or_audit.eval.adapters.base import ModalityAdapter, register_adapter
+from or_audit.eval.adapters.base import ModalityAdapter
 from or_audit.eval.enums import ModalityKind
 
 
@@ -139,11 +139,3 @@ class FluoroscopyAdapter(ModalityAdapter):
             }
         )
         return spec
-
-
-register_adapter(ModalityKind.FLUOROSCOPY_DSA, FluoroscopyAdapter, override=True)
-register_adapter(
-    ModalityKind.ENDOVASCULAR_SIM,
-    lambda **kw: FluoroscopyAdapter(ModalityKind.ENDOVASCULAR_SIM, **kw),
-    override=True,
-)

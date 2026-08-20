@@ -1,0 +1,21 @@
+format_version = "2"
+id = "example/cvs-detector"
+agent_version = "0"
+kind = "frozen-model"
+weights_pin = "c0ccb95502d4b990f23860c0d450965c6e3efb5b766f72f5aa3990735c94b452"
+weights_path = "predictions.json"
+
+[[capabilities]]
+interface = "video-predict"
+interaction_modes = ["single-turn"]
+protocol_versions = ["1"]
+observations = ["video-clip"]
+outputs = ["structured-prediction"]
+features = ["abstention"]
+modalities = ["video-laparoscopic"]
+
+[runtime]
+kind = "local"
+protocol_version = "1"
+entrypoint = "predictor.py:load_predictor"
+timeout_sec = 60.0

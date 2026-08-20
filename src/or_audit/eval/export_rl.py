@@ -17,8 +17,15 @@ from or_audit.errors import ScoreContractError, TaskContractError
 from or_audit.eval.cartesian import iter_job_dirs
 from or_audit.eval.enums import ProjectionId
 from or_audit.eval.integrity import tree_digest
-from or_audit.eval.job import read_job_config, read_job_result, resolve_bundle_path
+from or_audit.eval.job import (
+    JobResult,
+    read_job_config,
+    read_job_result,
+    resolve_bundle_path,
+    verify_head,
+)
 from or_audit.eval.loader import load_task
+from or_audit.eval.sim.base import BACKEND_REAL, BACKEND_SYNTHETIC_STUB
 from or_audit.eval.task import ProjectionSpec, TaskSpec
 from or_audit.eval.vector import project
 
@@ -54,12 +61,50 @@ def _spec_for_task(task: TaskSpec, projection_id: ProjectionId | str) -> Project
     return task.projection
 
 
+def _assert_physical_backend(job_dir: Path, result: JobResult) -> None:
+    """Refuse rewards not attested as real physics.
+
+    Provenance is read from the head-covered ``JobResult.world_engine``, never
+    from the mutable ``config.json``. Export positively requires ``backend ==
+    BACKEND_REAL``; synthetic stand-ins, unattested (``unknown``) runs, and
+    missing provenance are all refused.
+    """
+    world_engine = result.world_engine
+    if world_engine is None:
+        raise TaskContractError(
+            f"{job_dir.name} records no head-bound world-engine backend "
+            "(JobResult.world_engine missing); refusing to export rewards from "
+            "unattested physics"
+        )
+    if world_engine.backend == BACKEND_SYNTHETIC_STUB:
+        engine = world_engine.engine or "unknown"
+        raise TaskContractError(
+            f"{job_dir.name} ran against a synthetic stand-in for the {engine} world "
+            f'(world_engine.backend="{BACKEND_SYNTHETIC_STUB}"); refusing to '
+            f"export rewards from fabricated physics. Re-run the job against a real "
+            f"simulation backend, or drop environment.synthetic_stub from the task."
+        )
+    if world_engine.backend != BACKEND_REAL:
+        engine = world_engine.engine or "unknown"
+        raise TaskContractError(
+            f"{job_dir.name} ran with unattested physics "
+            f'(world_engine.backend="{world_engine.backend}"); refusing to export '
+            f"rewards from an environment that reported no real simulation backend. "
+            f"Re-run the job against a real simulation backend."
+        )
+
+
 def export_job_records(
     job_dir: Path, *, projection_id: ProjectionId | str
 ) -> tuple[RlExportRecord, ...]:
     """Recompute one job's trials into RL records."""
     config = read_job_config(job_dir)
     result = read_job_result(job_dir)
+    # The result head must verify before we trust any of its provenance or
+    # projections; world_engine is bound by that head, not by config.json.
+    if not verify_head(result):
+        raise TaskContractError(f"{job_dir.name} result head does not verify; refusing to export")
+    _assert_physical_backend(job_dir, result)
     task_dir = resolve_bundle_path(job_dir, config["task_dir"], label="task")
     if tree_digest(task_dir) != config.get("task_digest"):
         raise TaskContractError(f"{job_dir.name} bundled task digest does not match config")

@@ -62,6 +62,47 @@ class _Frozen(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
+#: SHA-256 lowercase hex — a 64-char immutable content pin.
+SHA256Hex = Annotated[
+    str, StringConstraints(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+]
+#: Observation source locator: ``"$"`` addresses the whole observation,
+#: otherwise a JSON pointer (``/camera``) or dotted path (``camera.frame``).
+SourceLocator = Annotated[
+    str, StringConstraints(min_length=1, max_length=400, pattern=r"^[a-zA-Z0-9_./$-]+$")
+]
+
+
+class StreamSpec(_Frozen):
+    """One sensor/data channel a task presents to an agent.
+
+    ``schema_id`` names the observation schema (data shape) this channel
+    carries, so agent capabilities bind to data shape — not to a closed
+    procedure taxonomy. ``adapter`` is the adapter-plugin identity: an open
+    plugin id resolvable in the adapter registry and pinned immutably by
+    ``adapter_digest``, the SHA-256 of the plugin content, verified at task
+    load. ``source`` locates the observation slice this stream consumes:
+    ``"$"`` for the whole observation, otherwise a JSON pointer / dotted path
+    into it. A stream with an unresolvable required source is a contract
+    error, never a silent pass-through.
+    """
+
+    id: Slug
+    schema_id: Slug
+    adapter: Slug
+    adapter_digest: SHA256Hex
+    source: SourceLocator = "$"
+    role: Slug | None = None
+
+    @model_validator(mode="after")
+    def _plugin_needs_schema(self) -> Self:
+        if not self.adapter:
+            raise TaskContractError(f"stream {self.id} requires an adapter plugin id")
+        if not self.schema_id:
+            raise TaskContractError(f"stream {self.id} requires an observation schema_id")
+        return self
+
+
 class InterfaceSpec(_Frozen):
     """Requirements a task exposes to compatible agents."""
 
@@ -72,7 +113,11 @@ class InterfaceSpec(_Frozen):
     actions: tuple[Slug, ...] = ()
     outputs: tuple[Slug, ...] = ()
     features: tuple[Slug, ...] = ()
-    modalities: tuple[Slug, ...] = ()
+    #: Composed modality streams. Each stream binds an observation schema to a
+    #: digest-pinned adapter plugin. Authoritative: there is no closed
+    #: ``ModalityKind`` dispatch; ``modalities`` on a capability is the open
+    #: plugin-id list an agent implements.
+    streams: tuple[StreamSpec, ...] = ()
 
     @model_validator(mode="after")
     def _shape_matches_mode(self) -> Self:
@@ -82,6 +127,25 @@ class InterfaceSpec(_Frozen):
             raise TaskContractError(
                 f"{self.interaction_mode.value} interface {self.id} needs output"
             )
+        if self.interaction_mode is InteractionMode.INTERACTIVE and self.streams:
+            raise TaskContractError(
+                f"interactive interface {self.id} cannot declare streams: the "
+                "interactive agent route does not apply the stream/"
+                "observation-preprocessing pipeline yet"
+            )
+        known_schemas = set(self.observations) | set(self.features)
+        seen_ids: set[str] = set()
+        for stream in self.streams:
+            if stream.id in seen_ids:
+                raise TaskContractError(
+                    f"interface {self.id} declares duplicate stream id {stream.id!r}"
+                )
+            seen_ids.add(stream.id)
+            if stream.schema_id not in known_schemas:
+                raise TaskContractError(
+                    f"interface {self.id} stream {stream.id} schema {stream.schema_id!r} "
+                    "is not among the declared observations/features"
+                )
         return self
 
 
@@ -106,12 +170,16 @@ class CapabilitySpec(_Frozen):
 
     def satisfies(self, interface: InterfaceSpec) -> bool:
         """Return whether this declaration satisfies every task requirement."""
+        own_schemas = set(self.observations) | set(self.features)
         schemas_match = self.schema_wildcard or (
             set(interface.observations) <= set(self.observations)
             and set(interface.actions) <= set(self.actions)
             and set(interface.outputs) <= set(self.outputs)
             and set(interface.features) <= set(self.features)
-            and set(interface.modalities) <= set(self.modalities)
+            and all(
+                stream.schema_id in own_schemas and stream.adapter in self.modalities
+                for stream in interface.streams
+            )
         )
         return (
             self.interface == interface.id

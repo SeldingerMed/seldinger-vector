@@ -50,6 +50,10 @@ entrypoint = "verifier.py:load_verifier"
 
 [[verifier.gates]]
 id = "unsafe_prediction"
+inputs = { unsafe = "prediction.unsafe" }
+fail_when = "unsafe == true"
+realization = "scalar-dsl"
+abstain_ok = true
 
 [[verifier.metrics]]
 id = "next_step_correct"

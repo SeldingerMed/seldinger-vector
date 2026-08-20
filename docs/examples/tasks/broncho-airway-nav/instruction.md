@@ -1,3 +1,5 @@
+> **DRAFT — not runnable.** No paired agent or runnable world exists for this task yet. `surgeval bind` will refuse until a compatible agent package and simulation backend are shipped. This package is not published to the public registry.
+
 # Robotic Bronchoscopy Airway Navigation
 
 Navigate the robotic catheter through patient airway bifurcations to reach the target pulmonary nodule.

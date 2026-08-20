@@ -7,7 +7,12 @@ import pytest
 from or_audit.cli import build_parser, main
 
 
-def test_build_parser_default_prog_is_vector() -> None:
+def test_build_parser_default_prog_is_surgeval() -> None:
+    parser = build_parser(prog="surgeval")
+    assert parser.prog == "surgeval"
+
+
+def test_build_parser_vector_alias_prog() -> None:
     parser = build_parser(prog="vector")
     assert parser.prog == "vector"
 

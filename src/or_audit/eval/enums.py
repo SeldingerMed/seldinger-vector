@@ -33,6 +33,27 @@ class ModalityKind(StrEnum):
     SYNTHETIC_PROCEDURAL = "synthetic-procedural"
 
 
+class VerifierRealizationKind(StrEnum):
+    """Declared class of evidence backing a hard gate.
+
+    These are classes of evidence, not a procedure taxonomy, and the field
+    also accepts an open slug so a task author can declare a custom
+    realization without editing the kernel. ``scalar-dsl`` is the
+    transparent default: gates expressed as expressions over named evidence
+    locators resolved and hashed by the kernel. Non-DSL realizations
+    (learned, spatial, temporal, human-adjudicated, simulator-derived, or a
+    custom slug) are legitimate but must carry typed per-trial evidence
+    references and declared provenance.
+    """
+
+    SCALAR_DSL = "scalar-dsl"
+    LEARNED = "learned"
+    SPATIAL = "spatial"
+    TEMPORAL = "temporal"
+    HUMAN_PANEL = "human-panel"
+    SIMULATOR = "simulator"
+
+
 class GateKind(StrEnum):
     """Typology of inviolable physical and procedural safety gates."""
 

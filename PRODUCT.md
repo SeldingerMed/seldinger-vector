@@ -6,11 +6,11 @@ brand
 
 ## Users
 
-Engineers and research leads building medical robotics, procedural-video models, and world models. They arrive skeptical and need to determine whether Vector can run a real model against a pinned task, preserve safety outcomes as a vector, and produce an artifact another party can replay.
+Engineers and research leads building medical robotics, procedural-video models, and world models. They arrive skeptical and need to determine whether SurgEval can run a real model against a pinned task, preserve safety outcomes as a vector, and produce an artifact another party can replay.
 
 ## Product Purpose
 
-Vector is independent evaluation infrastructure for procedural medical AI. It binds immutable `org/name@version` task and agent packages by interface capabilities, executes agent and verifier code across explicit process boundaries, and emits replayable vector scorecards whose safety gates cannot be averaged away. Success means a technical visitor can run a closed-loop, multi-turn interactive, structured single-turn, or counterfactual evaluation; inspect the exact task, runtime, world pin, typed trace, vector, projection rule, and artifact head; and independently replay the result.
+SurgEval is independent evaluation infrastructure for procedural medical AI. It binds immutable `org/name@version` task and agent packages by interface capabilities, executes agent and verifier code across explicit process boundaries, and emits replayable vector scorecards whose safety gates cannot be averaged away. Success means a technical visitor can run a closed-loop, multi-turn interactive, structured single-turn, or counterfactual evaluation; inspect the exact task, runtime, world pin, typed trace, vector, projection rule, and artifact head; and independently replay the result.
 
 ## Brand Personality
 

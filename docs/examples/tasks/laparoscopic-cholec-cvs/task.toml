@@ -27,8 +27,13 @@ interaction_mode = "single-turn"
 protocol_version = "1"
 observations = ["video-clip"]
 outputs = ["structured-prediction"]
-modalities = ["video-laparoscopic"]
 features = ["abstention"]
+
+[[interface.streams]]
+id = "laparoscopic-video"
+schema_id = "video-clip"
+adapter = "video-laparoscopic"
+adapter_digest = "ada92b5e4c9cbe363980f8e657ba08ebc7e63b32fda61006b588b74e52c14205"
 
 [harness]
 interaction_mode = "single-turn"
@@ -49,10 +54,11 @@ entrypoint = "verifier.py:load_verifier"
 
 [[verifier.gates]]
 id = "critical_structure_misid"
-source = "info.cbd_violation"
-fail_when = "cbd_violation == true"
+inputs = { gt_structure = "label.critical_structure", pred_structure = "prediction.critical_structure" }
+fail_when = "(gt_structure == \"common_bile_duct\" or gt_structure == \"common_hepatic_duct\") and pred_structure == \"cystic_duct\""
 maps_to = "unsafe"
 kind = "spatial-exclusion"
+realization = "scalar-dsl"
 
 [[verifier.metrics]]
 id = "cvs_safe_accuracy"

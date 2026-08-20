@@ -87,47 +87,69 @@ class ModalityAdapter:
 
 
 _AdapterEntry = type[BaseModalityAdapter] | BaseModalityAdapter | Callable[..., BaseModalityAdapter]
-_ADAPTER_REGISTRY: dict[str, _AdapterEntry] = {}
+#: plugin-id -> (factory, content digest). The digest is the SHA-256 of the
+#: plugin module content, verified at bootstrap from a pinned manifest and
+#: served by :func:`adapter_revision` so task stream pins can be checked.
+_ADAPTER_REGISTRY: dict[str, tuple[_AdapterEntry, str]] = {}
 
 
 def register_adapter(
-    modality: ModalityKind | str,
+    plugin_id: ModalityKind | str,
     adapter: _AdapterEntry,
     *,
+    digest: str = "",
     override: bool = False,
 ) -> None:
-    """Register an adapter class, instance, or factory for a given modality."""
-    key = modality.value if isinstance(modality, ModalityKind) else str(modality)
+    """Register an adapter class, instance, or factory for a plugin id.
+
+    ``digest`` is the SHA-256 content identity of the plugin implementing the
+    adapter; a non-empty digest is what lets a task pin a stream to an exact
+    adapter version. When empty, the plugin is marked unpinned (digest `""`).
+    """
+    key = plugin_id.value if isinstance(plugin_id, ModalityKind) else str(plugin_id)
     if key in _ADAPTER_REGISTRY and not override:
         raise TaskContractError(f"modality adapter already registered for {key!r}")
-    _ADAPTER_REGISTRY[key] = adapter
+    _ADAPTER_REGISTRY[key] = (adapter, digest)
 
 
-def get_adapter(modality: ModalityKind | str, **kwargs: Any) -> BaseModalityAdapter | None:
-    """Get an instantiated adapter for a given modality, or None if not registered."""
-    key = modality.value if isinstance(modality, ModalityKind) else str(modality)
+def get_adapter(plugin_id: ModalityKind | str, **kwargs: Any) -> BaseModalityAdapter | None:
+    """Get an instantiated adapter for a plugin id, or None if not registered."""
+    key = plugin_id.value if isinstance(plugin_id, ModalityKind) else str(plugin_id)
     entry = _ADAPTER_REGISTRY.get(key)
     if entry is None:
         return None
-    if callable(entry):
-        return entry(**kwargs)
-    return entry
+    factory, _digest = entry
+    if callable(factory):
+        return factory(**kwargs)
+    return factory
 
 
-def require_adapter(modality: ModalityKind | str, **kwargs: Any) -> BaseModalityAdapter:
+def adapter_revision(plugin_id: ModalityKind | str) -> str:
+    """Return the SHA-256 content identity of a registered adapter plugin.
+
+    Returns the empty string for an unpinned (locally-ad-hoc) plugin or when
+    the plugin id is unknown. Task load refuses to pin a stream to an
+    unknown/unpinned adapter (comparison against ``""`` never matches).
+    """
+    key = plugin_id.value if isinstance(plugin_id, ModalityKind) else str(plugin_id)
+    entry = _ADAPTER_REGISTRY.get(key)
+    return "" if entry is None else entry[1]
+
+
+def require_adapter(plugin_id: ModalityKind | str, **kwargs: Any) -> BaseModalityAdapter:
     """Get an adapter or raise TaskContractError if not registered."""
-    adapter = get_adapter(modality, **kwargs)
+    adapter = get_adapter(plugin_id, **kwargs)
     if adapter is None:
-        key = modality.value if isinstance(modality, ModalityKind) else str(modality)
+        key = plugin_id.value if isinstance(plugin_id, ModalityKind) else str(plugin_id)
         known = ", ".join(sorted(_ADAPTER_REGISTRY.keys()))
         raise TaskContractError(f"unknown modality {key!r}; registered adapters: {known}")
     return adapter
 
 
 def list_adapters() -> dict[str, str]:
-    """Return dictionary of registered modalities and their adapter class names."""
+    """Return dictionary of registered plugin ids and their adapter class names."""
     result = {}
-    for k, v in sorted(_ADAPTER_REGISTRY.items()):
+    for k, (v, _digest) in sorted(_ADAPTER_REGISTRY.items()):
         if isinstance(v, type):
             result[k] = v.__name__
         elif callable(v):
@@ -143,29 +165,8 @@ def clear_registry() -> None:
 
 
 def reset_default_adapters() -> None:
-    """Reset and re-populate the adapter registry with default built-in adapters."""
+    """Reset and re-populate the adapter registry from the bundled manifest."""
     _ADAPTER_REGISTRY.clear()
-    from or_audit.eval.adapters.endoluminal import EndoluminalAdapter
-    from or_audit.eval.adapters.fluoroscopy import FluoroscopyAdapter
-    from or_audit.eval.adapters.kinematics import KinematicsAdapter
-    from or_audit.eval.adapters.video import VideoAdapter
+    from or_audit.eval.adapters.manifest import bootstrap_adapter_plugins
 
-    register_adapter(ModalityKind.VIDEO_LAPAROSCOPIC, VideoAdapter, override=True)
-    register_adapter(
-        ModalityKind.VIDEO_ENDOSCOPIC,
-        lambda **kw: VideoAdapter(ModalityKind.VIDEO_ENDOSCOPIC, **kw),
-        override=True,
-    )
-    register_adapter(ModalityKind.AIRWAY_BRONCHOSCOPY, EndoluminalAdapter, override=True)
-    register_adapter(ModalityKind.FLUOROSCOPY_DSA, FluoroscopyAdapter, override=True)
-    register_adapter(
-        ModalityKind.ENDOVASCULAR_SIM,
-        lambda **kw: FluoroscopyAdapter(ModalityKind.ENDOVASCULAR_SIM, **kw),
-        override=True,
-    )
-    register_adapter(ModalityKind.ROBOTIC_KINEMATICS, KinematicsAdapter, override=True)
-    register_adapter(
-        ModalityKind.ORTHOPEDIC_POINTCLOUD,
-        lambda **kw: KinematicsAdapter(ModalityKind.ORTHOPEDIC_POINTCLOUD, **kw),
-        override=True,
-    )
+    bootstrap_adapter_plugins()
