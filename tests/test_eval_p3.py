@@ -321,7 +321,7 @@ def test_reconstitute_refuses_unknown_trajectory(tmp_path: Path) -> None:
 def test_cli_run_job_and_export(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr("or_audit.eval.runner.make_gym", _fake)
+    monkeypatch.setattr("or_audit.eval.sim.gym_bridge.make_gym", _fake)
     task_dir = _pinned_lumen(tmp_path)
     job_dir = _write_job(tmp_path, task_dir, n=2)
     out = tmp_path / "cli-job"
@@ -433,7 +433,7 @@ def test_cli_export_rl_refuses_undeclared_projection(tmp_path: Path) -> None:
 
 
 def test_cli_n_overrides_job_n(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("or_audit.eval.runner.make_gym", _fake)
+    monkeypatch.setattr("or_audit.eval.sim.gym_bridge.make_gym", _fake)
     task_dir = _pinned_lumen(tmp_path)
     job_dir = _write_job(tmp_path, task_dir, n=30)
     out = tmp_path / "cli-n"

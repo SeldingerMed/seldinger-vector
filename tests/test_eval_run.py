@@ -367,7 +367,7 @@ def test_cli_run_video(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> No
 
 def test_cli_run_random_gym(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     task_dir = _pinned_lumen(tmp_path)
-    monkeypatch.setattr("or_audit.eval.runner.make_gym", _fake)
+    monkeypatch.setattr("or_audit.eval.sim.gym_bridge.make_gym", _fake)
     out = tmp_path / "cli-gym"
     assert main(["run", "-t", str(task_dir), "-a", "random", "-n", "30", "--out", str(out)]) == 0
     result = read_job_result(out)
