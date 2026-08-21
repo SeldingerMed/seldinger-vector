@@ -2,6 +2,8 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
+LABEL org.opencontainers.image.source="https://github.com/SeldingerMed/seldinger-vector" \
+    org.opencontainers.image.description="Vector Cloud control plane and RunPod worker"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git \
