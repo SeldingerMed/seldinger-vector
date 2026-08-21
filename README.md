@@ -98,7 +98,8 @@ Production requires bearer authentication and configures remote executors
 through the environment. RunPod execution additionally requires
 `RUNPOD_API_KEY`, an HTTPS `VECTOR_CLOUD_PUBLIC_URL`, and the worker image from
 this repository pinned as `image@sha256:<digest>` in
-`VECTOR_CLOUD_RUNPOD_IMAGE`. Build the same image for the control plane and
+`VECTOR_CLOUD_RUNPOD_IMAGE`. Private images also set the RunPod credential ID in
+`VECTOR_CLOUD_RUNPOD_REGISTRY`. Build the same image for the control plane and
 workers:
 
 ```bash
@@ -106,8 +107,9 @@ docker buildx build --platform linux/amd64 -t registry/vector-cloud:VERSION --pu
 ```
 
 RunPod job `task` values are immutable single-task taskset references such as
-`seldingermed/video-nextstep@0`; `agent` values use the same versioned registry
-format. The hosted beta accepts public or de-identified packages only. Each
+`seldingermed/video-nextstep@1`; `agent` values use the same versioned registry
+format, for example `example/video-predictor@1`. The hosted beta accepts public
+or de-identified packages only. Each
 remote job receives a one-time callback credential bound to that job; the
 control plane validates the returned `result.json` head before committing the
 evidence bundle. Local execution is opt-in development behavior and cannot bind

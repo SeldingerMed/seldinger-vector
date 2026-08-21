@@ -177,6 +177,7 @@ def test_runpod_executor_sends_secure_allowlisted_worker_request(tmp_path: Path)
         api_key="runpod-token",
         callback_url="https://vector.example",
         worker_image=PINNED_IMAGE,
+        registry_id="reg_private",
         transport=transport,
     )
     record = store.create(
@@ -202,6 +203,7 @@ def test_runpod_executor_sends_secure_allowlisted_worker_request(tmp_path: Path)
     assert body["image"] == PINNED_IMAGE
     assert body["args"] == "cloud worker"
     assert body["gpu"] == {"id": "NVIDIA L40S", "count": 1}
+    assert body["registry"] == "reg_private"
     assert isinstance(env, dict)
     callback_token = env["VECTOR_CLOUD_CALLBACK_TOKEN"]
     assert isinstance(callback_token, str)
