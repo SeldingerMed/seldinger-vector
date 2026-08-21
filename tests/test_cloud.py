@@ -36,12 +36,16 @@ PINNED_IMAGE = "registry.example/vector-worker@sha256:" + "a" * 64
 class RecordingExecutor:
     def __init__(self) -> None:
         self.submitted: list[str] = []
+        self.released: list[str] = []
 
     def submit(self, job: JobRecord) -> None:
         self.submitted.append(job.id)
 
     def cancel(self, job: JobRecord) -> None:
         del job
+
+    def release(self, job: JobRecord) -> None:
+        self.released.append(job.id)
 
     def reconcile(self, job: JobRecord) -> JobRecord:
         return job
@@ -274,10 +278,17 @@ def test_remote_failure_callback_is_job_scoped_and_terminal(tmp_path: Path) -> N
         )
     )
     store.set_callback_token(remote.id, "failure-token")
+    store.transition(
+        remote.id,
+        expected=(JobStatus.QUEUED,),
+        status=JobStatus.PROVISIONING,
+        provider_id="pod_123",
+    )
+    executor = RecordingExecutor()
     client = TestClient(
         create_app(
             store=store,
-            executors={},
+            executors={ExecutorKind.RUNPOD: executor},
             artifact_root=tmp_path / "data",
             token="control-token",
         )
@@ -293,6 +304,7 @@ def test_remote_failure_callback_is_job_scoped_and_terminal(tmp_path: Path) -> N
     assert response.json()["status"] == "failed"
     assert response.json()["error"] == "model process exited 7"
     assert not store.verify_callback_token(remote.id, "failure-token")
+    assert executor.released == [remote.id]
 
 
 def test_remote_callback_rejects_unsafe_archive_without_consuming_token(

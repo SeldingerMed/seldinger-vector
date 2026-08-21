@@ -25,6 +25,7 @@ class Executor(Protocol):
     def submit(self, job: JobRecord) -> None: ...
 
     def cancel(self, job: JobRecord) -> None: ...
+    def release(self, job: JobRecord) -> None: ...
 
     def reconcile(self, job: JobRecord) -> JobRecord: ...
 
@@ -64,6 +65,9 @@ class LocalExecutor:
 
     def reconcile(self, job: JobRecord) -> JobRecord:
         return self.store.get(job.id) or job
+
+    def release(self, job: JobRecord) -> None:
+        del job
 
     def _run(self, job: JobRecord) -> None:
         process: subprocess.Popen[str] | None = None
@@ -245,9 +249,12 @@ class RunPodExecutor:
             self.store.clear_callback_token(job.id)
             raise
 
-    def cancel(self, job: JobRecord) -> None:
+    def release(self, job: JobRecord) -> None:
         if job.provider_id:
             self._request("DELETE", f"/v2/pods/{job.provider_id}", None, expected=(204,))
+
+    def cancel(self, job: JobRecord) -> None:
+        self.release(job)
         self.store.transition(
             job.id,
             expected=(JobStatus.QUEUED, JobStatus.PROVISIONING, JobStatus.RUNNING),
