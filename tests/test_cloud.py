@@ -166,6 +166,7 @@ def test_runpod_executor_sends_secure_allowlisted_worker_request(tmp_path: Path)
     def transport(request: Request, timeout: float) -> tuple[int, bytes]:
         assert timeout == 30
         assert request.get_header("Authorization") == "Bearer runpod-token"
+        assert request.get_header("User-agent") == "VectorCloud/0.1"
         assert isinstance(request.data, bytes)
         body = json.loads(request.data)
         assert isinstance(body, dict)

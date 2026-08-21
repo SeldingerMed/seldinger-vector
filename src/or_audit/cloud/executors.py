@@ -306,6 +306,7 @@ class RunPodExecutor:
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
+                "User-Agent": "VectorCloud/0.1",
             },
         )
         try:
