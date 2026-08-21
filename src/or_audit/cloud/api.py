@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -59,6 +59,11 @@ def create_app(
         _require_control_token(authorization, token)
 
     auth = Depends(authorize)
+
+    def schedule_release(record: JobRecord, background_tasks: BackgroundTasks) -> None:
+        executor = executors.get(record.request.executor)
+        if executor is not None and record.provider_id:
+            background_tasks.add_task(executor.release, record)
 
     @app.get("/healthz")
     def health() -> dict[str, str]:
@@ -146,6 +151,7 @@ def create_app(
     async def complete_job(
         job_id: str,
         request: Request,
+        background_tasks: BackgroundTasks,
         authorization: Annotated[str | None, Header()] = None,
         x_vector_result_head: Annotated[str | None, Header()] = None,
     ) -> JobRecord:
@@ -182,7 +188,7 @@ def create_app(
             shutil.rmtree(extracted, ignore_errors=True)
             raise HTTPException(status_code=422, detail="callback head does not match result.json")
         try:
-            return store.transition(
+            completed = store.transition(
                 job_id,
                 expected=(JobStatus.QUEUED, JobStatus.PROVISIONING, JobStatus.RUNNING),
                 status=JobStatus.SUCCEEDED,
@@ -191,6 +197,8 @@ def create_app(
                 error="",
                 callback_token=callback_token,
             )
+            schedule_release(completed, background_tasks)
+            return completed
         except TaskContractError as exc:
             shutil.rmtree(extracted, ignore_errors=True)
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -199,6 +207,7 @@ def create_app(
     def fail_job(
         job_id: str,
         failure: WorkerFailure,
+        background_tasks: BackgroundTasks,
         authorization: Annotated[str | None, Header()] = None,
     ) -> JobRecord:
         record = _require_remote_job(store, job_id)
@@ -206,13 +215,15 @@ def create_app(
         if record.status in {JobStatus.SUCCEEDED, JobStatus.CANCELLED}:
             raise HTTPException(status_code=409, detail=f"job is already {record.status.value}")
         try:
-            return store.transition(
+            failed = store.transition(
                 job_id,
                 expected=(JobStatus.QUEUED, JobStatus.PROVISIONING, JobStatus.RUNNING),
                 status=JobStatus.FAILED,
                 error=failure.error,
                 callback_token=callback_token,
             )
+            schedule_release(failed, background_tasks)
+            return failed
         except TaskContractError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
