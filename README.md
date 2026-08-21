@@ -96,11 +96,19 @@ uv run surgeval cloud serve --enable-local --allow-anonymous
 
 Production requires bearer authentication and configures remote executors
 through the environment. RunPod execution additionally requires
-`RUNPOD_API_KEY`, an HTTPS `VECTOR_CLOUD_PUBLIC_URL`, and an allowlisted worker
-image in `VECTOR_CLOUD_RUNPOD_IMAGE` pinned as `image@sha256:<digest>`.
+`RUNPOD_API_KEY`, an HTTPS `VECTOR_CLOUD_PUBLIC_URL`, and the worker image from
+this repository pinned as `image@sha256:<digest>` in
+`VECTOR_CLOUD_RUNPOD_IMAGE`. Build the same image for the control plane and
+workers:
 
-The hosted beta accepts public or de-identified task and agent packages only.
-Each remote job receives a one-time callback credential bound to that job; the
+```bash
+docker buildx build --platform linux/amd64 -t registry/vector-cloud:VERSION --push .
+```
+
+RunPod job `task` values are immutable single-task taskset references such as
+`seldingermed/video-nextstep@0`; `agent` values use the same versioned registry
+format. The hosted beta accepts public or de-identified packages only. Each
+remote job receives a one-time callback credential bound to that job; the
 control plane validates the returned `result.json` head before committing the
 evidence bundle. Local execution is opt-in development behavior and cannot bind
 a non-loopback host.

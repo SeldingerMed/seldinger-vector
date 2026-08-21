@@ -34,6 +34,8 @@ def run_from_env() -> int:
     callback = required["VECTOR_CLOUD_CALLBACK_URL"].rstrip("/")
     token = required["VECTOR_CLOUD_CALLBACK_TOKEN"]
     job_id = required["VECTOR_CLOUD_JOB_ID"]
+    task = required["VECTOR_CLOUD_TASK"]
+    task_flag = "-s" if "@" in task and not Path(task).exists() else "-t"
     with tempfile.TemporaryDirectory(prefix="vector-worker-") as tmp:
         result_dir = Path(tmp) / "result"
         command = [
@@ -41,8 +43,8 @@ def run_from_env() -> int:
             "-m",
             "or_audit.cli",
             "run",
-            "-t",
-            required["VECTOR_CLOUD_TASK"],
+            task_flag,
+            task,
             "-a",
             required["VECTOR_CLOUD_AGENT"],
             "-n",
@@ -63,9 +65,20 @@ def run_from_env() -> int:
             )
             return completed.returncode or 1
         result_path = result_dir / "result.json"
+        if not result_path.is_file():
+            result_paths = tuple(result_dir.glob("*/result.json"))
+            if len(result_paths) != 1:
+                error = f"worker expected one task result, found {len(result_paths)}"
+                _post_json(
+                    f"{callback}/v1/internal/jobs/{job_id}/fail",
+                    token,
+                    {"error": error},
+                )
+                return 1
+            result_path = result_paths[0]
         result = json.loads(result_path.read_text(encoding="utf-8"))
         head = str(result.get("head", ""))
-        payload = _archive(result_dir)
+        payload = _archive(result_path.parent)
         _post_archive(
             f"{callback}/v1/internal/jobs/{job_id}/complete",
             token,
