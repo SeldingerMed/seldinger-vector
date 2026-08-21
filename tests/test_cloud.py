@@ -424,11 +424,13 @@ def test_worker_runs_job_and_posts_evidence(
     completed = _run_local_video(store, tmp_path)
     source = Path(completed.artifact_path)
     posted: dict[str, object] = {}
+    commands: list[list[str]] = []
     _set_worker_env(monkeypatch)
 
     def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         del kwargs
-        destination = Path(command[command.index("--out") + 1])
+        commands.append(command)
+        destination = Path(command[command.index("--out") + 1]) / source.name
         shutil.copytree(source, destination)
         return subprocess.CompletedProcess(command, 0, "", "")
 
@@ -439,10 +441,37 @@ def test_worker_runs_job_and_posts_evidence(
     monkeypatch.setattr(worker, "_post_archive", fake_post)
 
     assert worker.run_from_env() == 0
+    assert commands[0][commands[0].index("run") + 1 :][:2] == [
+        "-s",
+        "seldingermed/video-nextstep@0",
+    ]
     assert posted["token"] == "callback-token"
     assert posted["head"] == completed.result_head
     assert str(posted["url"]).endswith("/v1/internal/jobs/job-123/complete")
     assert isinstance(posted["payload"], bytes)
+
+
+def test_worker_refuses_multi_task_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    posted: dict[str, object] = {}
+    _set_worker_env(monkeypatch)
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        destination = Path(command[command.index("--out") + 1])
+        for task_id in ("first", "second"):
+            result = destination / task_id / "result.json"
+            result.parent.mkdir(parents=True)
+            result.write_text("{}", encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    def fake_post(url: str, token: str, body: dict[str, str]) -> None:
+        posted.update(url=url, token=token, body=body)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(worker, "_post_json", fake_post)
+
+    assert worker.run_from_env() == 1
+    assert posted["body"] == {"error": "worker expected one task result, found 2"}
 
 
 def test_worker_reports_cli_failure(
