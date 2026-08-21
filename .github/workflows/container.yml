@@ -41,13 +41,5 @@ jobs:
             ghcr.io/seldingermed/seldinger-vector-cloud:${{ github.sha }}
             ghcr.io/seldingermed/seldinger-vector-cloud:main
 
-      - name: Make the linked package public
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: >-
-          gh api --method PATCH
-          /orgs/SeldingerMed/packages/container/seldinger-vector-cloud
-          -f visibility=public
-
       - name: Report immutable image
         run: echo "ghcr.io/seldingermed/seldinger-vector-cloud@${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"

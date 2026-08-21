@@ -169,6 +169,7 @@ class RunPodExecutor:
         api_key: str,
         callback_url: str,
         worker_image: str,
+        registry_id: str = "",
         transport: Transport | None = None,
         base_url: str = "https://api.runpod.io",
     ) -> None:
@@ -182,6 +183,7 @@ class RunPodExecutor:
         self.api_key = api_key
         self.callback_url = callback_url.rstrip("/")
         self.worker_image = worker_image
+        self.registry_id = registry_id
         self.transport = transport or _transport
         self.base_url = base_url.rstrip("/")
 
@@ -192,7 +194,7 @@ class RunPodExecutor:
             raise TaskContractError(f"unsupported RunPod compute class {request.compute.value!r}")
         callback_token = secrets.token_urlsafe(32)
         self.store.set_callback_token(job.id, callback_token)
-        body = {
+        body: dict[str, object] = {
             "name": request.name or f"vector-{job.id[:12]}",
             "cloud": "SECURE",
             "image": self.worker_image,
@@ -209,6 +211,8 @@ class RunPodExecutor:
                 "VECTOR_CLOUD_REGISTRY": request.registry,
             },
         }
+        if self.registry_id:
+            body["registry"] = self.registry_id
         provider_id = ""
         try:
             response = self._request("POST", "/v2/pods", body)

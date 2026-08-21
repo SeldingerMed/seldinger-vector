@@ -235,6 +235,7 @@ def app_from_env() -> FastAPI:
     runpod_key = os.environ.get("RUNPOD_API_KEY", "")
     callback_url = os.environ.get("VECTOR_CLOUD_PUBLIC_URL", "")
     worker_image = os.environ.get("VECTOR_CLOUD_RUNPOD_IMAGE", "")
+    registry_id = os.environ.get("VECTOR_CLOUD_RUNPOD_REGISTRY", "")
     if runpod_key:
         if not callback_url or not worker_image:
             raise TaskContractError(
@@ -245,6 +246,7 @@ def app_from_env() -> FastAPI:
             api_key=runpod_key,
             callback_url=callback_url,
             worker_image=worker_image,
+            registry_id=registry_id,
         )
     return create_app(
         store=store,
