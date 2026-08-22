@@ -23,7 +23,7 @@ from urllib.request import Request, urlopen
 
 from or_audit.errors import TaskContractError
 
-from .models import ComputeClass, InputArtifact, JobRecord, JobStatus, MachineSize
+from .models import ComputeClass, InputArtifact, JobRecord, JobRequest, JobStatus, MachineSize
 from .store import JobStore
 
 
@@ -159,13 +159,24 @@ class LocalExecutor:
                 self._processes.pop(job.id, None)
 
 
+_MACHINE0_SIZE_CANDIDATES = {
+    MachineSize.LARGE: ("large",),
+    MachineSize.XL: ("xl",),
+    MachineSize.XXL: ("xxl",),
+    MachineSize.XXXL: ("xxxl",),
+    MachineSize.GPU_L40S: ("gpu-l40s-1", "gpu-6000ada-1"),
+    MachineSize.GPU_H100: ("gpu-h100-1", "gpu-h200-1"),
+}
+
 _MACHINE0_PRICE_PER_HOUR_MICROS = {
-    MachineSize.LARGE: 52_000,
-    MachineSize.XL: 104_000,
-    MachineSize.XXL: 208_000,
-    MachineSize.XXXL: 825_000,
-    MachineSize.GPU_L40S: 1_727_000,
-    MachineSize.GPU_H100: 4_851_000,
+    "large": 52_000,
+    "xl": 104_000,
+    "xxl": 208_000,
+    "xxxl": 825_000,
+    "gpu-l40s-1": 1_727_000,
+    "gpu-6000ada-1": 1_727_000,
+    "gpu-h100-1": 4_851_000,
+    "gpu-h200-1": 4_917_000,
 }
 
 
@@ -250,6 +261,8 @@ class Machine0Executor:
     def _run(self, job: JobRecord) -> None:
         machine_name = f"vector-{job.id[:12]}"
         started = datetime.now(UTC)
+        request = job.request
+        provider_size = request.machine_size.value
         with self._lock:
             self._machines[job.id] = machine_name
         try:
@@ -261,21 +274,7 @@ class Machine0Executor:
                 provider_id=machine_name,
                 started_at=started,
             )
-            request = job.request
-            self._checked(
-                [
-                    self.binary,
-                    "new",
-                    machine_name,
-                    "--size",
-                    request.machine_size.value,
-                    "--region",
-                    request.region,
-                    "--image",
-                    self._image_for_size(request.machine_size),
-                ],
-                timeout=900,
-            )
+            provider_size = self._create_machine(machine_name, request)
             self._wait_for_ssh(machine_name)
             self.store.transition(
                 job.id,
@@ -379,7 +378,7 @@ class Machine0Executor:
             result = json.loads(result_path.read_text(encoding="utf-8"))
             completed = datetime.now(UTC)
             runtime_seconds = max(1, math.ceil((completed - started).total_seconds()))
-            provider_cost = self._provider_cost(request.machine_size, runtime_seconds)
+            provider_cost = self._provider_cost(provider_size, runtime_seconds)
             self.store.transition(
                 job.id,
                 expected=(JobStatus.RUNNING,),
@@ -393,7 +392,7 @@ class Machine0Executor:
         except Exception as exc:
             completed = datetime.now(UTC)
             runtime_seconds = max(1, math.ceil((completed - started).total_seconds()))
-            provider_cost = self._provider_cost(job.request.machine_size, runtime_seconds)
+            provider_cost = self._provider_cost(provider_size, runtime_seconds)
             with suppress(TaskContractError):
                 self.store.transition(
                     job.id,
@@ -409,6 +408,30 @@ class Machine0Executor:
                 self._remove_machine(machine_name)
             with self._lock:
                 self._machines.pop(job.id, None)
+
+    def _create_machine(self, machine_name: str, request: JobRequest) -> str:
+        last_error = ""
+        for provider_size in _MACHINE0_SIZE_CANDIDATES[request.machine_size]:
+            result = self.runner(
+                [
+                    self.binary,
+                    "new",
+                    machine_name,
+                    "--size",
+                    provider_size,
+                    "--region",
+                    request.region,
+                    "--image",
+                    self._image_for_size(request.machine_size),
+                ],
+                timeout=900,
+            )
+            if result.returncode == 0:
+                return provider_size
+            last_error = result.stderr.strip() or result.stdout.strip()
+            if "out of stock" not in last_error.lower():
+                raise TaskContractError(last_error or "Machine0 VM creation failed")
+        raise TaskContractError(last_error or "No requested hosted capacity is available")
 
     def _wait_for_ssh(self, machine_name: str) -> None:
         deadline = time.monotonic() + 600
@@ -501,8 +524,8 @@ class Machine0Executor:
         return self.image
 
     @staticmethod
-    def _provider_cost(size: MachineSize, runtime_seconds: int) -> int:
-        return math.ceil(_MACHINE0_PRICE_PER_HOUR_MICROS[size] * runtime_seconds / 3600)
+    def _provider_cost(provider_size: str, runtime_seconds: int) -> int:
+        return math.ceil(_MACHINE0_PRICE_PER_HOUR_MICROS[provider_size] * runtime_seconds / 3600)
 
     def _remove_machine(self, machine_name: str) -> None:
         with suppress(Exception):

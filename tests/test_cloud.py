@@ -235,6 +235,41 @@ def test_machine0_executor_provisions_isolated_vm_and_records_cost(tmp_path: Pat
     assert any("python3-venv" in command[-1] for command in commands if command[1] == "ssh")
 
 
+def test_machine0_gpu_capacity_falls_back_to_compatible_size(tmp_path: Path) -> None:
+    requested_sizes: list[str] = []
+
+    def runner(
+        command: list[str],
+        *,
+        cwd: Path | None = None,
+        timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
+        del cwd, timeout
+        requested_sizes.append(command[command.index("--size") + 1])
+        if requested_sizes[-1] == "gpu-l40s-1":
+            return subprocess.CompletedProcess(command, 1, "", "GPU is currently out of stock")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    executor = Machine0Executor(
+        JobStore(tmp_path / "jobs.sqlite"),
+        root=tmp_path / "data",
+        package_root=ROOT,
+        runner=runner,
+    )
+    request = JobRequest(
+        task="task",
+        agent="agent",
+        executor=ExecutorKind.MACHINE0,
+        compute=ComputeClass.L40S,
+        machine_size=MachineSize.GPU_L40S,
+    )
+
+    selected = executor._create_machine("vector-test", request)
+
+    assert selected == "gpu-6000ada-1"
+    assert requested_sizes == ["gpu-l40s-1", "gpu-6000ada-1"]
+
+
 def test_machine0_ssh_readiness_retries_command_timeout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
