@@ -219,6 +219,7 @@ class Machine0Executor:
         gpu_image: str = "gpu-h100x1-base",
         binary: str = "machine0",
         allowed_input_host: str = "",
+        key_name: str = "vector-service",
         keep_machines: bool = False,
         runner: CommandRunner = _run_command,
     ) -> None:
@@ -229,6 +230,7 @@ class Machine0Executor:
         self.gpu_image = gpu_image
         self.binary = binary
         self.allowed_input_host = allowed_input_host
+        self.key_name = key_name
         self.keep_machines = keep_machines
         self.runner = runner
         self._machines: dict[str, str] = {}
@@ -423,6 +425,8 @@ class Machine0Executor:
                     request.region,
                     "--image",
                     self._image_for_size(request.machine_size),
+                    "--key",
+                    self.key_name,
                 ],
                 timeout=900,
             )

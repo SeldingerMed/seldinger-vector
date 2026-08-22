@@ -255,6 +255,7 @@ def app_from_env() -> FastAPI:
             gpu_image=os.environ.get("VECTOR_CLOUD_MACHINE0_GPU_IMAGE", "gpu-h100x1-base"),
             binary=machine0_binary,
             allowed_input_host=os.environ.get("VECTOR_CLOUD_INPUT_HOST", ""),
+            key_name=os.environ.get("VECTOR_CLOUD_MACHINE0_KEY", "vector-service"),
             keep_machines=os.environ.get("VECTOR_CLOUD_MACHINE0_KEEP") == "1",
         )
     runpod_key = os.environ.get("RUNPOD_API_KEY", "")

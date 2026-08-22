@@ -231,6 +231,11 @@ def test_machine0_executor_provisions_isolated_vm_and_records_cost(tmp_path: Pat
     assert completed.provider_cost_micros > 0
     assert completed.runtime_seconds > 0
     assert any(command[1] == "new" for command in commands)
+    assert any(
+        command[command.index("--key") + 1] == "vector-service"
+        for command in commands
+        if command[1] == "new"
+    )
     assert any(command[1] == "rm" for command in commands)
     assert any("python3-venv" in command[-1] for command in commands if command[1] == "ssh")
 
