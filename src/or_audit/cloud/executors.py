@@ -205,6 +205,7 @@ class Machine0Executor:
         root: Path,
         package_root: Path,
         image: str = "ubuntu-24-04-loaded",
+        gpu_image: str = "gpu-h100x1-base",
         binary: str = "machine0",
         allowed_input_host: str = "",
         keep_machines: bool = False,
@@ -214,6 +215,7 @@ class Machine0Executor:
         self.root = root
         self.package_root = package_root
         self.image = image
+        self.gpu_image = gpu_image
         self.binary = binary
         self.allowed_input_host = allowed_input_host
         self.keep_machines = keep_machines
@@ -270,7 +272,7 @@ class Machine0Executor:
                     "--region",
                     request.region,
                     "--image",
-                    self.image,
+                    self._image_for_size(request.machine_size),
                 ],
                 timeout=900,
             )
@@ -492,6 +494,11 @@ class Machine0Executor:
             if reference in {artifact.name, f"uploads/{artifact.name}"}:
                 return f"uploads/{artifact.name}"
         return reference
+
+    def _image_for_size(self, size: MachineSize) -> str:
+        if size in {MachineSize.GPU_L40S, MachineSize.GPU_H100}:
+            return self.gpu_image
+        return self.image
 
     @staticmethod
     def _provider_cost(size: MachineSize, runtime_seconds: int) -> int:

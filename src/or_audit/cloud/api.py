@@ -252,6 +252,9 @@ def app_from_env() -> FastAPI:
             root=data,
             package_root=package_root,
             image=os.environ.get("VECTOR_CLOUD_MACHINE0_IMAGE", "ubuntu-24-04-loaded"),
+            gpu_image=os.environ.get(
+                "VECTOR_CLOUD_MACHINE0_GPU_IMAGE", "gpu-h100x1-base"
+            ),
             binary=machine0_binary,
             allowed_input_host=os.environ.get("VECTOR_CLOUD_INPUT_HOST", ""),
             keep_machines=os.environ.get("VECTOR_CLOUD_MACHINE0_KEEP") == "1",

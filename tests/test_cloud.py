@@ -212,6 +212,7 @@ def test_machine0_executor_provisions_isolated_vm_and_records_cost(tmp_path: Pat
         package_root=ROOT,
         runner=runner,
     )
+    assert executor._image_for_size(MachineSize.GPU_L40S) == "gpu-h100x1-base"
     record = store.create(
         JobRequest(
             task=str(VIDEO_TASK),
