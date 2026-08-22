@@ -25,6 +25,11 @@ CREATE TABLE IF NOT EXISTS jobs (
     artifact_path TEXT NOT NULL DEFAULT '',
     result_head TEXT NOT NULL DEFAULT '',
     error TEXT NOT NULL DEFAULT '',
+    machine_name TEXT NOT NULL DEFAULT '',
+    started_at TEXT,
+    completed_at TEXT,
+    provider_cost_micros INTEGER NOT NULL DEFAULT 0,
+    runtime_seconds INTEGER NOT NULL DEFAULT 0,
     callback_token_hash TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS jobs_created_at ON jobs(created_at DESC);
@@ -38,10 +43,17 @@ class JobStore:
         with self._connect() as connection:
             connection.executescript(_SCHEMA)
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(jobs)")}
-            if "callback_token_hash" not in columns:
-                connection.execute(
-                    "ALTER TABLE jobs ADD COLUMN callback_token_hash TEXT NOT NULL DEFAULT ''"
-                )
+            additions = {
+                "callback_token_hash": "TEXT NOT NULL DEFAULT ''",
+                "machine_name": "TEXT NOT NULL DEFAULT ''",
+                "started_at": "TEXT",
+                "completed_at": "TEXT",
+                "provider_cost_micros": "INTEGER NOT NULL DEFAULT 0",
+                "runtime_seconds": "INTEGER NOT NULL DEFAULT 0",
+            }
+            for name, declaration in additions.items():
+                if name not in columns:
+                    connection.execute(f"ALTER TABLE jobs ADD COLUMN {name} {declaration}")
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -122,12 +134,17 @@ class JobStore:
         artifact_path: str | None = None,
         result_head: str | None = None,
         error: str | None = None,
+        machine_name: str | None = None,
+        started_at: datetime | None = None,
+        completed_at: datetime | None = None,
+        provider_cost_micros: int | None = None,
+        runtime_seconds: int | None = None,
         callback_token: str | None = None,
         clear_callback: bool = False,
     ) -> JobRecord:
         if not expected:
             raise ValueError("transition requires at least one expected status")
-        values: dict[str, str] = {
+        values: dict[str, object] = {
             "updated_at": datetime.now(UTC).isoformat(),
             "status": status.value,
         }
@@ -139,6 +156,16 @@ class JobStore:
             values["result_head"] = result_head
         if error is not None:
             values["error"] = error
+        if machine_name is not None:
+            values["machine_name"] = machine_name
+        if started_at is not None:
+            values["started_at"] = started_at.isoformat()
+        if completed_at is not None:
+            values["completed_at"] = completed_at.isoformat()
+        if provider_cost_micros is not None:
+            values["provider_cost_micros"] = provider_cost_micros
+        if runtime_seconds is not None:
+            values["runtime_seconds"] = runtime_seconds
         conditions = ["id = ?", f"status IN ({','.join('?' for _ in expected)})"]
         condition_values = [job_id, *(item.value for item in expected)]
         if callback_token is not None or clear_callback:
@@ -171,4 +198,9 @@ def _record(row: sqlite3.Row) -> JobRecord:
         artifact_path=row["artifact_path"],
         result_head=row["result_head"],
         error=row["error"],
+        machine_name=row["machine_name"],
+        started_at=datetime.fromisoformat(row["started_at"]) if row["started_at"] else None,
+        completed_at=datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None,
+        provider_cost_micros=row["provider_cost_micros"],
+        runtime_seconds=row["runtime_seconds"],
     )

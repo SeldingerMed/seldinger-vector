@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
-LABEL org.opencontainers.image.source="https://github.com/SeldingerMed/seldinger-vector" \
+LABEL org.opencontainers.image.source="https://github.com/SeldingerMed/vector" \
     org.opencontainers.image.description="Vector Cloud control plane and RunPod worker"
 
 RUN apt-get update \

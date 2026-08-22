@@ -15,7 +15,7 @@ from pydantic import ValidationError
 
 from or_audit.cloud import worker
 from or_audit.cloud.api import create_app
-from or_audit.cloud.executors import LocalExecutor, RunPodExecutor
+from or_audit.cloud.executors import LocalExecutor, Machine0Executor, RunPodExecutor
 from or_audit.cloud.models import (
     ComputeClass,
     DataClassification,
@@ -23,6 +23,7 @@ from or_audit.cloud.models import (
     JobRecord,
     JobRequest,
     JobStatus,
+    MachineSize,
 )
 from or_audit.cloud.store import JobStore
 from or_audit.errors import TaskContractError
@@ -98,6 +99,21 @@ def test_hosted_request_refuses_phi_confidential_and_unversioned_packages() -> N
             executor=ExecutorKind.RUNPOD,
             compute=ComputeClass.L4,
         )
+    with pytest.raises(ValidationError, match="public or deidentified"):
+        JobRequest(
+            task="task",
+            agent="agent",
+            executor=ExecutorKind.MACHINE0,
+            data_classification=DataClassification.CONFIDENTIAL,
+        )
+    with pytest.raises(ValidationError, match="disagree"):
+        JobRequest(
+            task="task",
+            agent="agent",
+            executor=ExecutorKind.MACHINE0,
+            compute=ComputeClass.L40S,
+            machine_size=MachineSize.LARGE,
+        )
 
 
 def test_runpod_executor_refuses_mutable_worker_image(tmp_path: Path) -> None:
@@ -161,6 +177,92 @@ def test_local_executor_persists_unexpected_failure(tmp_path: Path) -> None:
 
     assert completed.status is JobStatus.FAILED
     assert completed.error
+
+
+def test_machine0_executor_provisions_isolated_vm_and_records_cost(tmp_path: Path) -> None:
+    store = JobStore(tmp_path / "jobs.sqlite")
+    commands: list[list[str]] = []
+
+    def runner(
+        command: list[str],
+        *,
+        cwd: Path | None = None,
+        timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
+        del cwd, timeout
+        commands.append(command)
+        if command[1:3] == ["sync", "push"] and command[-1].endswith(":~/vector"):
+            stage = Path(command[3])
+            assert (stage / "pyproject.toml").is_file()
+            assert (stage / "src").is_dir()
+            assert not (stage / ".env.production").exists()
+            assert not (stage / ".git").exists()
+        if command[1:3] == ["sync", "pull"]:
+            destination = Path(command[-1]) / "vector-result"
+            destination.mkdir(parents=True, exist_ok=True)
+            (destination / "result.json").write_text('{"head":"vector-head"}', encoding="utf-8")
+            trial = destination / "trial-0"
+            trial.mkdir()
+            (trial / "result.json").write_text('{"head":"trial-head"}', encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    executor = Machine0Executor(
+        store,
+        root=tmp_path / "data",
+        package_root=ROOT,
+        runner=runner,
+    )
+    record = store.create(
+        JobRequest(
+            task=str(VIDEO_TASK),
+            agent=str(VIDEO_AGENT),
+            executor=ExecutorKind.MACHINE0,
+            machine_size=MachineSize.LARGE,
+        )
+    )
+
+    executor._run(record)
+    completed = store.get(record.id)
+
+    assert completed is not None
+    assert completed.status is JobStatus.SUCCEEDED, completed.error
+    assert all("--json" not in command for command in commands if command[1] == "new")
+    assert completed.provider_cost_micros > 0
+    assert completed.runtime_seconds > 0
+    assert any(command[1] == "new" for command in commands)
+    assert any(command[1] == "rm" for command in commands)
+    assert any("python3-venv" in command[-1] for command in commands if command[1] == "ssh")
+
+
+def test_machine0_ssh_readiness_retries_command_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    attempts = 0
+
+    def runner(
+        command: list[str],
+        *,
+        cwd: Path | None = None,
+        timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal attempts
+        del cwd, timeout
+        attempts += 1
+        if attempts == 1:
+            raise subprocess.TimeoutExpired(command, 30)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr("or_audit.cloud.executors.time.sleep", lambda _seconds: None)
+    executor = Machine0Executor(
+        JobStore(tmp_path / "jobs.sqlite"),
+        root=tmp_path / "data",
+        package_root=ROOT,
+        runner=runner,
+    )
+
+    executor._wait_for_ssh("vector-test")
+
+    assert attempts == 2
 
 
 def test_runpod_executor_sends_secure_allowlisted_worker_request(tmp_path: Path) -> None:

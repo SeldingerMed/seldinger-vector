@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from or_audit.errors import TaskContractError
 from or_audit.eval.job import JobResult, verify_head
 
-from .executors import Executor, LocalExecutor, RunPodExecutor
+from .executors import Executor, LocalExecutor, Machine0Executor, RunPodExecutor
 from .models import ExecutorKind, JobRecord, JobRequest, JobStatus
 from .store import JobStore
 
@@ -243,6 +243,19 @@ def app_from_env() -> FastAPI:
     executors: dict[ExecutorKind, Executor] = {}
     if enable_local:
         executors[ExecutorKind.LOCAL] = LocalExecutor(store, root=data, package_root=package_root)
+    if os.environ.get("VECTOR_CLOUD_ENABLE_MACHINE0") == "1":
+        machine0_binary = os.environ.get("VECTOR_CLOUD_MACHINE0_BINARY", "machine0")
+        if shutil.which(machine0_binary) is None:
+            raise TaskContractError(f"Machine0 CLI not found: {machine0_binary}")
+        executors[ExecutorKind.MACHINE0] = Machine0Executor(
+            store,
+            root=data,
+            package_root=package_root,
+            image=os.environ.get("VECTOR_CLOUD_MACHINE0_IMAGE", "ubuntu-24-04-loaded"),
+            binary=machine0_binary,
+            allowed_input_host=os.environ.get("VECTOR_CLOUD_INPUT_HOST", ""),
+            keep_machines=os.environ.get("VECTOR_CLOUD_MACHINE0_KEEP") == "1",
+        )
     runpod_key = os.environ.get("RUNPOD_API_KEY", "")
     callback_url = os.environ.get("VECTOR_CLOUD_PUBLIC_URL", "")
     worker_image = os.environ.get("VECTOR_CLOUD_RUNPOD_IMAGE", "")

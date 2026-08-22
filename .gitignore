@@ -8,9 +8,6 @@ dist/
 # Environments
 .venv/
 venv/
-.env
-.env.*
-!.env.example
 
 # Tooling caches
 .pytest_cache/
@@ -37,3 +34,11 @@ coverage.xml
 *.mov
 *.avi
 *.dcm
+
+.projects/cache
+.projects/vault
+.projects/state.test.json
+.projects/state.local.test.json
+.env
+.env.*
+!.env.example

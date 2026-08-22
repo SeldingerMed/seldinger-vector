@@ -7,12 +7,13 @@ from enum import StrEnum
 from typing import Self
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
 
 
 class ExecutorKind(StrEnum):
     LOCAL = "local"
     RUNPOD = "runpod"
+    MACHINE0 = "machine0"
 
 
 class ComputeClass(StrEnum):
@@ -21,6 +22,24 @@ class ComputeClass(StrEnum):
     L40S = "l40s"
     A100 = "a100-80gb"
     H100 = "h100-pcie"
+
+
+class MachineSize(StrEnum):
+    LARGE = "large"
+    XL = "xl"
+    XXL = "xxl"
+    XXXL = "xxxl"
+    GPU_L40S = "gpu-l40s-1"
+    GPU_H100 = "gpu-h100-1"
+
+
+class InputArtifact(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    url: AnyHttpUrl
+    name: str = Field(min_length=1, max_length=200, pattern=r"^[^/\\]+$")
+    type: str = Field(default="application/octet-stream", max_length=120)
+    size: int = Field(default=0, ge=0, le=50 * 1024 * 1024)
 
 
 class DataClassification(StrEnum):
@@ -54,6 +73,10 @@ class JobRequest(BaseModel):
     compute: ComputeClass = ComputeClass.CPU
     data_classification: DataClassification = DataClassification.DEIDENTIFIED
     registry: str = ""
+    machine_size: MachineSize = MachineSize.LARGE
+    region: str = Field(default="us-east", pattern=r"^(us-east|us-west|uk|eu|asia)$")
+    estimated_minutes: int = Field(default=10, ge=1, le=1440)
+    inputs: tuple[InputArtifact, ...] = Field(default=(), max_length=20)
 
     @model_validator(mode="after")
     def validate_executor(self) -> Self:
@@ -64,6 +87,12 @@ class JobRequest(BaseModel):
                 raise ValueError("RunPod jobs require a GPU compute class")
             if "@" not in self.task or "@" not in self.agent:
                 raise ValueError("RunPod jobs require versioned registry task and agent references")
+        if self.executor is ExecutorKind.MACHINE0:
+            if self.data_classification is DataClassification.CONFIDENTIAL:
+                raise ValueError("hosted Vector accepts public or deidentified data only")
+            gpu_size = self.machine_size in {MachineSize.GPU_L40S, MachineSize.GPU_H100}
+            if gpu_size != (self.compute is not ComputeClass.CPU):
+                raise ValueError("machine size and compute class disagree")
         return self
 
 
@@ -79,6 +108,11 @@ class JobRecord(BaseModel):
     artifact_path: str = ""
     result_head: str = ""
     error: str = ""
+    machine_name: str = ""
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    provider_cost_micros: int = Field(default=0, ge=0)
+    runtime_seconds: int = Field(default=0, ge=0)
 
     @classmethod
     def new(cls, request: JobRequest) -> JobRecord:

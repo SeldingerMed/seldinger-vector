@@ -69,13 +69,13 @@ extra_served = _serve({WHEEL: SHA})
     ("built", "served", "repo", "expect_ok"),
     [
         # exact match, bundle published by repo -> pass
-        (_built(), _serve(_built()), "SeldingerMed/seldinger-vector", True),
+        (_built(), _serve(_built()), "SeldingerMed/vector", True),
         # expected sdist missing from the index -> fail
-        (_built(), extra_served, "SeldingerMed/seldinger-vector", False),
+        (_built(), extra_served, "SeldingerMed/vector", False),
         # extra served file not in the built set -> fail
-        (_built(), rogue_served, "SeldingerMed/seldinger-vector", False),
+        (_built(), rogue_served, "SeldingerMed/vector", False),
         # digest mismatch -> fail
-        (_built(), mismatch_served, "SeldingerMed/seldinger-vector", False),
+        (_built(), mismatch_served, "SeldingerMed/vector", False),
         # no PEP 740 bundle -> fail
         (_built(), _serve(_built()), None, False),
     ],

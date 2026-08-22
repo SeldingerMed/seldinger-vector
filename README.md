@@ -1,14 +1,14 @@
-# SurgEval
+# Vector
 
-[![CI](https://github.com/SeldingerMed/seldinger-vector/actions/workflows/ci.yml/badge.svg)](https://github.com/SeldingerMed/seldinger-vector/actions/workflows/ci.yml)
+[![CI](https://github.com/SeldingerMed/vector/actions/workflows/ci.yml/badge.svg)](https://github.com/SeldingerMed/vector/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
 Auditable evaluation infrastructure for procedural medical AI.
 
-SurgEval turns "the agent scored X" into evidence you can re-derive. The design rests on one rule: the thing being measured does not grade itself. A task pins down what its world requires, an agent declares which capabilities it can actually run, and a task-owned verifier scores each trial from labels the agent never sees. Every trial is written as replayable, content-addressed evidence. The reward you export is recomputed from the authoritative vector, not reported by the agent, and a mismatched head, package digest, or projection is refused outright.
+Vector turns "the agent scored X" into evidence you can re-derive. The design rests on one rule: the thing being measured does not grade itself. A task pins down what its world requires, an agent declares which capabilities it can actually run, and a task-owned verifier scores each trial from labels the agent never sees. Every trial is written as replayable, content-addressed evidence. The reward you export is recomputed from the authoritative vector, not reported by the agent, and a mismatched head, package digest, or projection is refused outright.
 
-That rule matters in procedural medicine, where a false pass is worse than no signal. Reporting a metric is cheap. Producing a trace another process can re-derive to the same number is not. SurgEval makes the second the requirement.
+That rule matters in procedural medicine, where a false pass is worse than no signal. Reporting a metric is cheap. Producing a trace another process can re-derive to the same number is not. Vector makes the second the requirement.
 
 What you get:
 
@@ -18,7 +18,7 @@ What you get:
 - Replay that refuses on mismatch. A vector is reconstructed from its stored trace through the bundled verifier, and any drift in head, package digest, or projection fails the replay.
 - A public registry of tasksets and agents, pinned by git ref and content digest, so published runs carry the same trust boundary as local ones.
 
-The v0.3 kernel implements all four harness modes without procedure-specific runner branches. Install the CLI as `surgeval`; `vector` and `or-audit` remain one-release aliases.
+The v0.3 kernel implements all four harness modes without procedure-specific runner branches. Install the Python distribution as `surgeval` and invoke the CLI as `vector`; `or_audit` remains the internal implementation package.
 
 ## Requirements
 

@@ -3,21 +3,27 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import secrets
+import shlex
+import shutil
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable
 from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from or_audit.errors import TaskContractError
 
-from .models import ComputeClass, JobRecord, JobStatus
+from .models import ComputeClass, InputArtifact, JobRecord, JobStatus, MachineSize
 from .store import JobStore
 
 
@@ -151,6 +157,352 @@ class LocalExecutor:
         finally:
             with self._lock:
                 self._processes.pop(job.id, None)
+
+
+_MACHINE0_PRICE_PER_HOUR_MICROS = {
+    MachineSize.LARGE: 52_000,
+    MachineSize.XL: 104_000,
+    MachineSize.XXL: 208_000,
+    MachineSize.XXXL: 825_000,
+    MachineSize.GPU_L40S: 1_727_000,
+    MachineSize.GPU_H100: 4_851_000,
+}
+
+
+class CommandRunner(Protocol):
+    def __call__(
+        self,
+        command: list[str],
+        *,
+        cwd: Path | None = None,
+        timeout: float,
+    ) -> subprocess.CompletedProcess[str]: ...
+
+
+def _run_command(
+    command: list[str],
+    *,
+    cwd: Path | None = None,
+    timeout: float,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        cwd=cwd,
+        timeout=timeout,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+class Machine0Executor:
+    """Provision one isolated VM per run and remove it after evidence is copied back."""
+
+    def __init__(
+        self,
+        store: JobStore,
+        *,
+        root: Path,
+        package_root: Path,
+        image: str = "ubuntu-24-04-loaded",
+        binary: str = "machine0",
+        allowed_input_host: str = "",
+        keep_machines: bool = False,
+        runner: CommandRunner = _run_command,
+    ) -> None:
+        self.store = store
+        self.root = root
+        self.package_root = package_root
+        self.image = image
+        self.binary = binary
+        self.allowed_input_host = allowed_input_host
+        self.keep_machines = keep_machines
+        self.runner = runner
+        self._machines: dict[str, str] = {}
+        self._lock = threading.Lock()
+        root.mkdir(parents=True, exist_ok=True)
+
+    def submit(self, job: JobRecord) -> None:
+        threading.Thread(target=self._run, args=(job,), daemon=True).start()
+
+    def cancel(self, job: JobRecord) -> None:
+        with self._lock:
+            machine_name = self._machines.get(job.id) or job.machine_name
+        self.store.transition(
+            job.id,
+            expected=(JobStatus.QUEUED, JobStatus.PROVISIONING, JobStatus.RUNNING),
+            status=JobStatus.CANCELLED,
+            error="cancelled by user",
+            completed_at=datetime.now(UTC),
+        )
+        if machine_name:
+            self._remove_machine(machine_name)
+
+    def reconcile(self, job: JobRecord) -> JobRecord:
+        return self.store.get(job.id) or job
+
+    def release(self, job: JobRecord) -> None:
+        if not self.keep_machines and job.machine_name:
+            self._remove_machine(job.machine_name)
+
+    def _run(self, job: JobRecord) -> None:
+        machine_name = f"vector-{job.id[:12]}"
+        started = datetime.now(UTC)
+        with self._lock:
+            self._machines[job.id] = machine_name
+        try:
+            self.store.transition(
+                job.id,
+                expected=(JobStatus.QUEUED,),
+                status=JobStatus.PROVISIONING,
+                machine_name=machine_name,
+                provider_id=machine_name,
+                started_at=started,
+            )
+            request = job.request
+            self._checked(
+                [
+                    self.binary,
+                    "new",
+                    machine_name,
+                    "--size",
+                    request.machine_size.value,
+                    "--region",
+                    request.region,
+                    "--image",
+                    self.image,
+                ],
+                timeout=900,
+            )
+            self._wait_for_ssh(machine_name)
+            self.store.transition(
+                job.id,
+                expected=(JobStatus.PROVISIONING,),
+                status=JobStatus.RUNNING,
+            )
+
+            job_root = self.root / job.id
+            inputs_root = job_root / "inputs"
+            job_root.mkdir(parents=True, exist_ok=True)
+            package_stage = self._stage_package(job_root)
+            self._checked(
+                [
+                    self.binary,
+                    "sync",
+                    "push",
+                    f"{package_stage}/",
+                    f"{machine_name}:~/vector",
+                ],
+                timeout=1200,
+            )
+            if request.inputs:
+                inputs_root.mkdir(parents=True, exist_ok=True)
+                for artifact in request.inputs:
+                    self._download_input(
+                        str(artifact.url),
+                        inputs_root / self._safe_name(artifact.name),
+                    )
+                self._checked(
+                    [
+                        self.binary,
+                        "sync",
+                        "push",
+                        f"{inputs_root}/",
+                        f"{machine_name}:~/vector/uploads",
+                    ],
+                    timeout=600,
+                )
+
+            task = self._remote_reference(request.task, request.inputs)
+            agent = self._remote_reference(request.agent, request.inputs)
+            remote_command = [
+                "set -e",
+                "sudo cloud-init status --wait >/dev/null",
+                "sudo apt-get -o DPkg::Lock::Timeout=300 update -qq",
+                "sudo DEBIAN_FRONTEND=noninteractive apt-get "
+                "-o DPkg::Lock::Timeout=300 install -y -qq python3-venv",
+                "cd ~/vector",
+                "python3 -m venv .venv",
+                ".venv/bin/pip install --disable-pip-version-check -e .",
+                " ".join(
+                    [
+                        ".venv/bin/vector",
+                        "run",
+                        "-t",
+                        shlex.quote(task),
+                        "-a",
+                        shlex.quote(agent),
+                        "-n",
+                        str(request.n),
+                        "--out",
+                        "~/vector-result",
+                        *(
+                            ["--registry", shlex.quote(request.registry)]
+                            if request.registry
+                            else []
+                        ),
+                    ]
+                ),
+            ]
+            self._checked(
+                [self.binary, "ssh", machine_name, " && ".join(remote_command)],
+                timeout=request.estimated_minutes * 60 + 1800,
+            )
+
+            artifact = job_root / "result"
+            self._checked(
+                [
+                    self.binary,
+                    "sync",
+                    "pull",
+                    f"{machine_name}:~/vector-result",
+                    str(artifact),
+                ],
+                timeout=900,
+            )
+            result_path = next(
+                (
+                    candidate
+                    for candidate in (
+                        artifact / "result.json",
+                        artifact / "vector-result" / "result.json",
+                    )
+                    if candidate.is_file()
+                ),
+                None,
+            )
+            if result_path is None:
+                raise TaskContractError("Machine0 run completed without result.json")
+            artifact = result_path.parent
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+            completed = datetime.now(UTC)
+            runtime_seconds = max(1, math.ceil((completed - started).total_seconds()))
+            provider_cost = self._provider_cost(request.machine_size, runtime_seconds)
+            self.store.transition(
+                job.id,
+                expected=(JobStatus.RUNNING,),
+                status=JobStatus.SUCCEEDED,
+                artifact_path=str(artifact),
+                result_head=str(result.get("head", "")),
+                completed_at=completed,
+                provider_cost_micros=provider_cost,
+                runtime_seconds=runtime_seconds,
+            )
+        except Exception as exc:
+            completed = datetime.now(UTC)
+            runtime_seconds = max(1, math.ceil((completed - started).total_seconds()))
+            provider_cost = self._provider_cost(job.request.machine_size, runtime_seconds)
+            with suppress(TaskContractError):
+                self.store.transition(
+                    job.id,
+                    expected=(JobStatus.QUEUED, JobStatus.PROVISIONING, JobStatus.RUNNING),
+                    status=JobStatus.FAILED,
+                    error=(f"{type(exc).__name__}: {exc}")[-4000:],
+                    completed_at=completed,
+                    provider_cost_micros=provider_cost,
+                    runtime_seconds=runtime_seconds,
+                )
+        finally:
+            if not self.keep_machines:
+                self._remove_machine(machine_name)
+            with self._lock:
+                self._machines.pop(job.id, None)
+
+    def _wait_for_ssh(self, machine_name: str) -> None:
+        deadline = time.monotonic() + 600
+        last_error = ""
+        while time.monotonic() < deadline:
+            try:
+                result = self.runner(
+                    [self.binary, "ssh", machine_name, "true"],
+                    timeout=30,
+                )
+            except subprocess.TimeoutExpired:
+                last_error = "SSH readiness check timed out"
+                time.sleep(5)
+                continue
+            if result.returncode == 0:
+                return
+            last_error = result.stderr.strip() or result.stdout.strip()
+            time.sleep(5)
+        raise TaskContractError(f"Machine0 SSH did not become ready: {last_error}")
+
+    def _checked(
+        self,
+        command: list[str],
+        *,
+        cwd: Path | None = None,
+        timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
+        result = self.runner(command, cwd=cwd, timeout=timeout)
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip()
+            raise TaskContractError(detail or f"{command[0]} exited {result.returncode}")
+        return result
+
+    def _download_input(self, url: str, destination: Path) -> None:
+        parsed = urlparse(url)
+        if parsed.scheme != "https":
+            raise TaskContractError("hosted inputs must use HTTPS")
+        if self.allowed_input_host and parsed.hostname != self.allowed_input_host:
+            raise TaskContractError("hosted input URL is not allowlisted")
+        total = 0
+        request = Request(url, headers={"User-Agent": "Vector-Cloud/1"})
+        with urlopen(request, timeout=60) as response, destination.open("wb") as output:
+            while chunk := response.read(1024 * 1024):
+                total += len(chunk)
+                if total > 50 * 1024 * 1024:
+                    raise TaskContractError("hosted input exceeds 50 MiB")
+                output.write(chunk)
+
+    def _stage_package(self, job_root: Path) -> Path:
+        stage = job_root / "package"
+        shutil.rmtree(stage, ignore_errors=True)
+        stage.mkdir(parents=True)
+        for name in ("pyproject.toml", "README.md", "LICENSE"):
+            source = self.package_root / name
+            if source.is_file():
+                shutil.copy2(source, stage / name)
+        for relative in (Path("src"), Path("docs/examples")):
+            source = self.package_root / relative
+            if source.is_dir():
+                shutil.copytree(
+                    source,
+                    stage / relative,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+                )
+        if not (stage / "pyproject.toml").is_file() or not (stage / "src").is_dir():
+            raise TaskContractError("Vector package staging is incomplete")
+        return stage
+
+    @staticmethod
+    def _safe_name(name: str) -> str:
+        if name in {".", ".."} or "/" in name or "\\" in name:
+            raise TaskContractError("invalid hosted input name")
+        return name
+
+    def _remote_reference(self, reference: str, inputs: tuple[InputArtifact, ...]) -> str:
+        path = Path(reference)
+        if path.is_absolute():
+            try:
+                return str(path.resolve().relative_to(self.package_root.resolve()))
+            except ValueError:
+                pass
+        for artifact in inputs:
+            if reference in {artifact.name, f"uploads/{artifact.name}"}:
+                return f"uploads/{artifact.name}"
+        return reference
+
+    @staticmethod
+    def _provider_cost(size: MachineSize, runtime_seconds: int) -> int:
+        return math.ceil(_MACHINE0_PRICE_PER_HOUR_MICROS[size] * runtime_seconds / 3600)
+
+    def _remove_machine(self, machine_name: str) -> None:
+        with suppress(Exception):
+            self.runner(
+                [self.binary, "rm", machine_name, "--yes"],
+                timeout=300,
+            )
 
 
 Transport = Callable[[Request, float], tuple[int, bytes]]
